@@ -13,6 +13,7 @@ import { useEffect } from "react";
 import Dashboard from "@/pages/dashboard";
 import ClientChart from "@/pages/client-chart";
 import Documents from "@/pages/documents";
+import Clients from "@/pages/clients";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -65,7 +66,7 @@ function AuthenticatedApp({ user }: { user: any }) {
             <Route path="/" component={Dashboard} />
             <Route path="/client-chart/:id" component={ClientChart} />
             <Route path="/documents" component={Documents} />
-            <Route path="/clients" component={() => <div>Clients page coming soon</div>} />
+            <Route path="/clients" component={Clients} />
             <Route path="/schedule" component={() => <div>Schedule page coming soon</div>} />
             <Route path="/assessments" component={() => <div>Assessments page coming soon</div>} />
             <Route path="/reports" component={() => <div>Reports page coming soon</div>} />
