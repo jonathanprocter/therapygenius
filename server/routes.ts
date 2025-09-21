@@ -15,7 +15,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Ensure upload directory exists
   await ensureUploadDir();
 
-  // Auth routes
+  // Legacy auth routes - DISABLED for security (single-therapist practice uses simple-login)
+  /*
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -102,10 +103,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Internal server error" });
     }
   });
+  */
 
   app.post("/api/auth/logout", (req, res) => {
     res.clearCookie("token");
     res.json({ message: "Logged out successfully" });
+  });
+
+  // Simple password-only login for single-therapist practice
+  app.post("/api/auth/simple-login", async (req, res) => {
+    try {
+      const { password } = req.body;
+      
+      if (!password) {
+        return res.status(400).json({ message: "Password required" });
+      }
+
+      // Check for the practice password from environment variable
+      const practicePassword = process.env.PRACTICE_PASSWORD || "5786";
+      if (password !== practicePassword) {
+        return res.status(401).json({ message: "Invalid password" });
+      }
+
+      // Get the first/only therapist user
+      const therapist = await storage.getUserByUsername("sjohnson_test");
+      if (!therapist) {
+        return res.status(500).json({ message: "System error: No therapist account found" });
+      }
+
+      // Generate token using existing auth helper
+      const token = generateToken(therapist.id);
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
+      res.json({
+        message: "Access granted",
+        user: {
+          id: therapist.id,
+          username: therapist.username,
+          email: therapist.email,
+          firstName: therapist.firstName,
+          lastName: therapist.lastName,
+        },
+      });
+    } catch (error) {
+      console.error("Simple login error:", error);
+      res.status(500).json({ message: "Login failed" });
+    }
   });
 
   app.get("/api/auth/me", requireAuth, async (req: AuthenticatedRequest, res) => {
