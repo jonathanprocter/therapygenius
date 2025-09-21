@@ -56,7 +56,7 @@ function AddClientDialog() {
       const clientData = {
         firstName: data.firstName,
         lastName: data.lastName,
-        dateOfBirth: new Date(data.dateOfBirth),
+        dateOfBirth: data.dateOfBirth || null,
         phone: data.phone || null,
         email: data.email || null,
         address: data.address || null,

@@ -181,6 +181,8 @@ export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  dateOfBirth: z.coerce.date().nullable(),
 });
 
 export const insertDocumentSchema = createInsertSchema(documents).omit({
