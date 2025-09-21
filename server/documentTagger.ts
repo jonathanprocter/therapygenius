@@ -1,31 +1,32 @@
-import OpenAI from "openai";
 import { Document, Client } from "@shared/schema";
 import { storage } from "./storage";
+import { aiRouter } from "./ai";
+import { z } from "zod";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Zod schema for document analysis validation
+const documentAnalysisSchema = z.object({
+  category: z.enum(["Assessment", "Session Note", "Treatment Plan", "Correspondence", "Legal", "Insurance", "Other"]),
+  tags: z.array(z.string()),
+  entities: z.object({
+    medications: z.array(z.string()).optional(),
+    diagnoses: z.array(z.string()).optional(),
+    dates: z.array(z.string()).optional(),
+    symptoms: z.array(z.string()).optional()
+  }),
+  clientMatch: z.object({
+    confidence: z.number(),
+    suggestedClientId: z.string().optional(),
+    reasoning: z.string()
+  }).optional(),
+  summary: z.string(),
+  sensitiveInfo: z.object({
+    hasSensitiveContent: z.boolean(),
+    types: z.array(z.string())
+  }),
+  keyInsights: z.array(z.string())
+});
 
-export interface DocumentAnalysis {
-  category: "Assessment" | "Session Note" | "Treatment Plan" | "Correspondence" | "Legal" | "Insurance" | "Other";
-  tags: string[];
-  entities: {
-    medications?: string[];
-    diagnoses?: string[];
-    dates?: string[];
-    symptoms?: string[];
-  };
-  clientMatch?: {
-    confidence: number;
-    suggestedClientId?: string;
-    reasoning: string;
-  };
-  summary: string;
-  sensitiveInfo: {
-    hasSensitiveContent: boolean;
-    types: string[];
-  };
-  keyInsights: string[];
-}
+export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema>;
 
 export const analyzeDocument = async (
   document: Document,
@@ -80,30 +81,27 @@ Guidelines:
 6. Provide 2-5 key insights about the content that would be valuable for the therapist
 `;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        {
-          role: "system",
-          content: "You are a specialized AI for analyzing therapy practice documents. Always respond with valid JSON.",
-        },
+    const analysisResult = await aiRouter.chatJSON(
+      [
         {
           role: "user",
-          content: analysisPrompt,
-        },
+          content: analysisPrompt
+        }
       ],
-      response_format: { type: "json_object" },
-    });
-
-    const analysisResult = JSON.parse(response.choices[0].message.content);
+      documentAnalysisSchema,
+      {
+        systemPrompt: "You are a specialized AI for analyzing therapy practice documents. Always respond with valid JSON.",
+        maxTokens: 2048
+      }
+    );
 
     // If a client match was suggested, find the actual client ID
-    if (analysisResult.clientMatch?.confidence > 0.7) {
+    if (analysisResult.clientMatch && analysisResult.clientMatch.confidence > 0.7) {
       const matchedClient = clients.find(client => 
         `${client.firstName} ${client.lastName}`.toLowerCase()
-          .includes(analysisResult.clientMatch.suggestedClientId?.toLowerCase() || "")
+          .includes(analysisResult.clientMatch?.suggestedClientId?.toLowerCase() || "")
       );
-      if (matchedClient) {
+      if (matchedClient && analysisResult.clientMatch) {
         analysisResult.clientMatch.suggestedClientId = matchedClient.id;
       }
     }
@@ -111,20 +109,25 @@ Guidelines:
     return analysisResult as DocumentAnalysis;
   } catch (error) {
     console.error("Error analyzing document:", error);
-    throw new Error(`Document analysis failed: ${error.message}`);
+    throw new Error(`Document analysis failed: ${(error as any)?.message || error}`);
   }
 };
+
+// Zod schema for case conceptualization validation
+const caseConceptualizationSchema = z.object({
+  conceptualization: z.string(),
+  patterns: z.array(z.string()),
+  recommendations: z.array(z.string()),
+  riskFactors: z.array(z.string()),
+  strengths: z.array(z.string())
+});
+
+export type CaseConceptualization = z.infer<typeof caseConceptualizationSchema>;
 
 export const generateCaseConceptualization = async (
   clientId: string,
   therapistId: string
-): Promise<{
-  conceptualization: string;
-  patterns: string[];
-  recommendations: string[];
-  riskFactors: string[];
-  strengths: string[];
-}> => {
+): Promise<CaseConceptualization> => {
   try {
     // Gather all client data
     const client = await storage.getClientById(clientId, therapistId);
@@ -165,24 +168,21 @@ Please provide a comprehensive case conceptualization in JSON format:
 Focus on evidence-based insights and practical clinical recommendations.
 `;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        {
-          role: "system",
-          content: "You are a licensed clinical psychologist providing evidence-based case conceptualization. Always respond with valid JSON.",
-        },
+    return await aiRouter.chatJSON(
+      [
         {
           role: "user",
-          content: conceptualizationPrompt,
-        },
+          content: conceptualizationPrompt
+        }
       ],
-      response_format: { type: "json_object" },
-    });
-
-    return JSON.parse(response.choices[0].message.content);
+      caseConceptualizationSchema,
+      {
+        systemPrompt: "You are a licensed clinical psychologist providing evidence-based case conceptualization. Always respond with valid JSON.",
+        maxTokens: 2048
+      }
+    );
   } catch (error) {
     console.error("Error generating case conceptualization:", error);
-    throw new Error(`Case conceptualization failed: ${error.message}`);
+    throw new Error(`Case conceptualization failed: ${(error as any)?.message || error}`);
   }
 };

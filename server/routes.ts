@@ -8,9 +8,36 @@ import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } f
 import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema } from "@shared/schema";
 import { z } from "zod";
 import cookieParser from "cookie-parser";
+import { randomBytes } from "crypto";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.use(cookieParser());
+  
+  // Modern CSRF Protection using double-submit cookies
+  const generateCSRFToken = () => randomBytes(32).toString('hex');
+  
+  // CSRF token endpoint
+  app.get("/api/csrf-token", (req, res) => {
+    const token = generateCSRFToken();
+    res.cookie('csrf-token', token, {
+      httpOnly: false, // Needs to be readable by frontend
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 60 * 60 * 1000 // 1 hour
+    });
+    res.json({ csrfToken: token });
+  });
+  
+  // CSRF validation middleware
+  const validateCSRF = (req: any, res: any, next: any) => {
+    const tokenFromHeader = req.headers['x-csrf-token'];
+    const tokenFromCookie = req.cookies['csrf-token'];
+    
+    if (!tokenFromHeader || !tokenFromCookie || tokenFromHeader !== tokenFromCookie) {
+      return res.status(403).json({ message: "CSRF token validation failed" });
+    }
+    next();
+  };
   
   // Ensure upload directory exists
   await ensureUploadDir();
@@ -105,13 +132,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   */
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", validateCSRF, (req, res) => {
     res.clearCookie("token");
     res.json({ message: "Logged out successfully" });
   });
 
   // Simple password-only login for single-therapist practice
-  app.post("/api/auth/simple-login", async (req, res) => {
+  app.post("/api/auth/simple-login", validateCSRF, async (req, res) => {
     try {
       const { password } = req.body;
       
@@ -119,8 +146,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Password required" });
       }
 
-      // Check for the practice password from environment variable
-      const practicePassword = process.env.PRACTICE_PASSWORD || "5786";
+      // SECURITY FIX: Require strong practice password from environment
+      const practicePassword = process.env.PRACTICE_PASSWORD;
+      if (!practicePassword) {
+        console.error('[SECURITY] PRACTICE_PASSWORD environment variable not set');
+        return res.status(500).json({ message: "Server configuration error" });
+      }
+      
+      if (practicePassword.length < 12) {
+        console.error('[SECURITY] PRACTICE_PASSWORD is too weak (minimum 12 characters required)');
+        return res.status(500).json({ message: "Server configuration error" });
+      }
+      
       if (password !== practicePassword) {
         return res.status(401).json({ message: "Invalid password" });
       }
@@ -335,7 +372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } catch (error) {
               console.error(`Failed to process document ${document.fileName}:`, error);
               await storage.updateDocument(document.id, {
-                processingError: error.message,
+                processingError: error instanceof Error ? error.message : String(error),
               }, req.userId!);
             }
           });
@@ -344,7 +381,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           results.push({
             fileName: file.originalname,
             status: "error",
-            error: error.message,
+            error: error instanceof Error ? error.message : String(error),
           });
         }
       }
@@ -406,6 +443,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Error creating session:", error);
       res.status(500).json({ message: "Failed to create session" });
+    }
+  });
+
+  // Calendar integration routes
+  app.get("/api/calendar/auth", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      const authUrl = calendarModule.calendarSync.getAuthUrl();
+      res.json({ authUrl });
+    } catch (error) {
+      console.error("Error generating calendar auth URL:", error);
+      res.status(500).json({ message: "Failed to generate auth URL" });
+    }
+  });
+
+  app.get("/api/calendar/callback", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { code } = req.query;
+      
+      if (!code || typeof code !== "string") {
+        return res.status(400).json({ message: "Authorization code required" });
+      }
+
+      const calendarModule = await import("./calendar-sync");
+      await calendarModule.calendarSync.exchangeCodeForTokens(code, req.userId!);
+      
+      res.json({ 
+        message: "Google Calendar successfully connected",
+        success: true 
+      });
+    } catch (error) {
+      console.error("Error handling calendar OAuth callback:", error);
+      res.status(500).json({ 
+        message: "Failed to connect Google Calendar",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.post("/api/calendar/sync", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      const syncStatus = await calendarModule.calendarSync.syncCalendar(req.userId!);
+      res.json(syncStatus);
+    } catch (error) {
+      console.error("Error syncing calendar:", error);
+      res.status(500).json({ 
+        message: "Calendar sync failed",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.get("/api/calendar/status", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      const status = await calendarModule.calendarSync.getSyncStatus(req.userId!);
+      res.json(status);
+    } catch (error) {
+      console.error("Error getting calendar status:", error);
+      res.status(500).json({ 
+        message: "Failed to get calendar status",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.delete("/api/calendar/disconnect", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      await calendarModule.calendarSync.revokeAccess(req.userId!);
+      res.json({ message: "Google Calendar disconnected successfully" });
+    } catch (error) {
+      console.error("Error disconnecting calendar:", error);
+      res.status(500).json({ 
+        message: "Failed to disconnect calendar",
+        error: error instanceof Error ? error.message : String(error) 
+      });
     }
   });
 

@@ -4,10 +4,7 @@ import fs from "fs/promises";
 import { Request } from "express";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-import OpenAI from "openai";
-
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { aiRouter } from "./ai";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
@@ -24,7 +21,7 @@ export const ensureUploadDir = async () => {
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     await ensureUploadDir();
-    const therapistDir = path.join(UPLOAD_DIR, req.userId || "unknown");
+    const therapistDir = path.join(UPLOAD_DIR, (req as any).userId || "unknown");
     try {
       await fs.access(therapistDir);
     } catch {
@@ -87,7 +84,7 @@ export const extractTextFromFile = async (filePath: string, mimeType: string): P
     }
   } catch (error) {
     console.error("Error extracting text from file:", error);
-    throw new Error(`Failed to extract text: ${error.message}`);
+    throw new Error(`Failed to extract text: ${(error as any)?.message || error}`);
   }
 };
 
@@ -140,31 +137,7 @@ const extractFromText = async (buffer: Buffer): Promise<ProcessedDocument> => {
 
 const extractFromImage = async (buffer: Buffer): Promise<ProcessedDocument> => {
   try {
-    const base64Image = buffer.toString("base64");
-    
-    const response = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Extract and transcribe all text from this image. Maintain the original formatting and structure as much as possible. If the image contains handwritten text, do your best to interpret it accurately.",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${base64Image}`,
-              },
-            },
-          ],
-        },
-      ],
-      max_completion_tokens: 2048,
-    });
-
-    const content = response.choices[0].message.content || "";
+    const content = await aiRouter.ocrImage(buffer);
     
     return {
       content,
@@ -175,7 +148,7 @@ const extractFromImage = async (buffer: Buffer): Promise<ProcessedDocument> => {
     };
   } catch (error) {
     console.error("Error performing OCR:", error);
-    throw new Error(`OCR failed: ${error.message}`);
+    throw new Error(`OCR failed: ${(error as any)?.message || error}`);
   }
 };
 

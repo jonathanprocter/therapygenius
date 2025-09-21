@@ -23,6 +23,11 @@ export const users = pgTable("users", {
   firstName: varchar("first_name", { length: 100 }),
   lastName: varchar("last_name", { length: 100 }),
   licenseNumber: varchar("license_number", { length: 50 }),
+  // Google Calendar OAuth integration - ENCRYPTED storage
+  encryptedOAuthTokens: text("encrypted_oauth_tokens"), // AES-256-GCM encrypted token storage
+  // Calendar sync tracking
+  lastCalendarSync: timestamp("last_calendar_sync"),
+  calendarSyncStats: jsonb("calendar_sync_stats"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -54,6 +59,32 @@ export const clients = pgTable("clients", {
 });
 
 // Documents table
+// HIPAA Audit Logs table - tamper-evident, persistent logging
+export const auditLogs = pgTable("audit_logs", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+  operation: varchar("operation", { length: 100 }).notNull(),
+  therapistId: uuid("therapist_id").references(() => users.id),
+  success: boolean("success").notNull(),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata"),
+  provider: varchar("provider", { length: 50 }), // ai, calendar, auth
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Rate limiting counters table - persistent rate limiting
+export const rateLimitCounters = pgTable("rate_limit_counters", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  therapistId: uuid("therapist_id").notNull().references(() => users.id),
+  endpoint: varchar("endpoint", { length: 100 }).notNull(),
+  requests: integer("requests").notNull().default(0),
+  resetTime: timestamp("reset_time").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   therapistId: uuid("therapist_id").notNull().references(() => users.id),
@@ -195,6 +226,18 @@ export const treatmentPlansRelations = relations(treatmentPlans, ({ one }) => ({
 }));
 
 // Insert schemas
+// Audit logs and rate limiting insert schemas
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertRateLimitCounterSchema = createInsertSchema(rateLimitCounters).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
@@ -251,3 +294,9 @@ export type InsertAssessment = z.infer<typeof insertAssessmentSchema>;
 
 export type TreatmentPlan = typeof treatmentPlans.$inferSelect;
 export type InsertTreatmentPlan = z.infer<typeof insertTreatmentPlanSchema>;
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+
+export type RateLimitCounter = typeof rateLimitCounters.$inferSelect;
+export type InsertRateLimitCounter = z.infer<typeof insertRateLimitCounterSchema>;

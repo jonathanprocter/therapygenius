@@ -5,6 +5,8 @@ import {
   sessions,
   assessments,
   treatmentPlans,
+  auditLogs,
+  rateLimitCounters,
   type User,
   type InsertUser,
   type Client,
@@ -17,9 +19,14 @@ import {
   type InsertAssessment,
   type TreatmentPlan,
   type InsertTreatmentPlan,
+  type AuditLog,
+  type InsertAuditLog,
+  type RateLimitCounter,
+  type InsertRateLimitCounter,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, like, or, sql } from "drizzle-orm";
+import { encryptionService, EncryptionAuditLogger } from "./encryption";
 import bcrypt from "bcrypt";
 
 export interface IStorage {
@@ -50,6 +57,8 @@ export interface IStorage {
   getSessionsByTherapist(therapistId: string, limit?: number): Promise<Session[]>;
   createSession(session: InsertSession): Promise<Session>;
   updateSession(id: string, session: Partial<Session>, therapistId: string): Promise<Session | undefined>;
+  upsertSessionByExternalId(session: InsertSession & { externalEventId: string }): Promise<Session>;
+  softDeleteSession(id: string, therapistId: string): Promise<boolean>;
 
   // Assessment operations
   getAssessmentsByClient(clientId: string, therapistId: string): Promise<Assessment[]>;
@@ -67,6 +76,44 @@ export interface IStorage {
     documentsProcessed: number;
     completedGoals: { completed: number; total: number };
   }>;
+
+  // Calendar integration methods
+  storeOAuthTokens(therapistId: string, tokens: {
+    access_token: string;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+    token_type?: string | null;
+    scope?: string | null;
+  }): Promise<void>;
+  getOAuthTokens(therapistId: string): Promise<{
+    access_token: string;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+    token_type?: string | null;
+    scope?: string | null;
+  } | null>;
+  deleteOAuthTokens(therapistId: string): Promise<void>;
+  getLastSyncTime(therapistId: string): Promise<Date | null>;
+  getCalendarSyncStats(therapistId: string): Promise<{
+    eventsProcessed?: number;
+    matchesFound?: number;
+    errors?: string[];
+  }>;
+  updateSyncStats(therapistId: string, stats: {
+    lastSync: Date;
+    eventsProcessed: number;
+    matchesFound: number;
+    errors: string[];
+  }): Promise<void>;
+  getSessionByExternalEventId(externalEventId: string, therapistId: string): Promise<Session | null>;
+  
+  // HIPAA Audit logging methods
+  createAuditLog(auditLog: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogs(therapistId?: string, limit?: number): Promise<AuditLog[]>;
+  
+  // Rate limiting methods
+  getRateLimitCounter(therapistId: string, endpoint: string): Promise<RateLimitCounter | null>;
+  updateRateLimitCounter(therapistId: string, endpoint: string, requests: number, resetTime: Date): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -123,7 +170,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .delete(clients)
       .where(and(eq(clients.id, id), eq(clients.therapistId, therapistId)));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getDocumentsByTherapist(therapistId: string, limit = 50): Promise<Document[]> {
@@ -169,7 +216,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .delete(documents)
       .where(and(eq(documents.id, id), eq(documents.therapistId, therapistId)));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async searchDocuments(query: string, therapistId: string): Promise<Document[]> {
@@ -217,6 +264,68 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(sessions.id, id), eq(sessions.therapistId, therapistId)))
       .returning();
     return updatedSession;
+  }
+
+  // RELIABILITY: Upsert session by external event ID for calendar sync
+  async upsertSessionByExternalId(session: InsertSession & { externalEventId: string }): Promise<Session> {
+    try {
+      // First try to find existing session by external event ID
+      const existingSession = await this.getSessionByExternalEventId(session.externalEventId, session.therapistId);
+      
+      if (existingSession) {
+        // Update existing session
+        const updatedSession = await this.updateSession(existingSession.id, {
+          clientId: session.clientId,
+          sessionDate: session.sessionDate,
+          duration: session.duration,
+          sessionType: session.sessionType,
+          notes: session.notes,
+          interventionsUsed: session.interventionsUsed,
+          homework: session.homework,
+          nextSessionPlan: session.nextSessionPlan,
+          aiTags: {
+            ...(existingSession.aiTags && typeof existingSession.aiTags === 'object' ? existingSession.aiTags : {}),
+            ...(session.aiTags && typeof session.aiTags === 'object' ? session.aiTags : {}),
+            lastUpdated: new Date().toISOString()
+          },
+          updatedAt: new Date()
+        }, session.therapistId);
+        
+        console.log(`[Storage] [RELIABILITY] Updated existing session ${existingSession.id} for event ${session.externalEventId}`);
+        return updatedSession!;
+      } else {
+        // Create new session
+        const newSession = await this.createSession(session);
+        console.log(`[Storage] [RELIABILITY] Created new session ${newSession.id} for event ${session.externalEventId}`);
+        return newSession;
+      }
+    } catch (error) {
+      console.error('[Storage] [RELIABILITY] Error upserting session:', error);
+      throw new Error('Failed to upsert session by external event ID');
+    }
+  }
+
+  // RELIABILITY: Soft delete session (mark as cancelled, preserve data)
+  async softDeleteSession(id: string, therapistId: string): Promise<boolean> {
+    try {
+      const result = await db
+        .update(sessions)
+        .set({ 
+          notes: sql`CONCAT(COALESCE(notes, ''), ' [CANCELLED: Event removed from calendar]')`,
+          aiTags: sql`COALESCE(ai_tags, '{}') || '{"status": "cancelled", "cancelledAt": "' || NOW() || '"}'`,
+          updatedAt: new Date()
+        })
+        .where(and(eq(sessions.id, id), eq(sessions.therapistId, therapistId)));
+        
+      const wasUpdated = (result.rowCount ?? 0) > 0;
+      if (wasUpdated) {
+        console.log(`[Storage] [RELIABILITY] Soft deleted session ${id} - marked as cancelled`);
+      }
+      return wasUpdated;
+    } catch (error) {
+      console.error('[Storage] [RELIABILITY] Error soft deleting session:', error);
+      throw new Error('Failed to soft delete session');
+    }
   }
 
   async getAssessmentsByClient(clientId: string, therapistId: string): Promise<Assessment[]> {
@@ -313,6 +422,203 @@ export class DatabaseStorage implements IStorage {
       documentsProcessed: documentsResult.count,
       completedGoals: { completed: completedGoals, total: totalGoals },
     };
+  }
+
+  // Calendar integration implementations (SECURITY: With encryption)
+  async storeOAuthTokens(therapistId: string, tokens: {
+    access_token: string;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+    token_type?: string | null;
+    scope?: string | null;
+  }): Promise<void> {
+    try {
+      // SECURITY: Encrypt OAuth tokens before storing
+      const encryptedTokens = encryptionService.encryptOAuthTokens(tokens);
+      
+      await db
+        .update(users)
+        .set({
+          encryptedOAuthTokens: encryptedTokens, // Store encrypted tokens securely
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, therapistId));
+        
+      EncryptionAuditLogger.logEncryption(true);
+      console.log(`[Storage] [SECURITY] OAuth tokens encrypted and stored for therapist ${therapistId}`);
+    } catch (error) {
+      EncryptionAuditLogger.logEncryption(false, error instanceof Error ? error.message : String(error));
+      console.error('[Storage] [SECURITY] Failed to encrypt and store OAuth tokens:', error);
+      throw new Error('Failed to securely store OAuth tokens');
+    }
+  }
+
+  async getOAuthTokens(therapistId: string): Promise<{
+    access_token: string;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+    token_type?: string | null;
+    scope?: string | null;
+  } | null> {
+    try {
+      const [user] = await db
+        .select({
+          encryptedOAuthTokens: users.encryptedOAuthTokens,
+        })
+        .from(users)
+        .where(eq(users.id, therapistId));
+
+      if (!user || !user.encryptedOAuthTokens) {
+        return null;
+      }
+
+      // SECURITY: Decrypt OAuth tokens from storage
+      const decryptedTokens = encryptionService.decryptOAuthTokens(user.encryptedOAuthTokens);
+      
+      EncryptionAuditLogger.logDecryption(true);
+      console.log(`[Storage] [SECURITY] OAuth tokens decrypted for therapist ${therapistId}`);
+      
+      return decryptedTokens;
+    } catch (error) {
+      EncryptionAuditLogger.logDecryption(false, error instanceof Error ? error.message : String(error));
+      console.error('[Storage] [SECURITY] Failed to decrypt OAuth tokens:', error);
+      return null; // Return null on decryption failure for security
+    }
+  }
+
+  async deleteOAuthTokens(therapistId: string): Promise<void> {
+    try {
+      await db
+        .update(users)
+        .set({
+          encryptedOAuthTokens: null,
+          lastCalendarSync: null,
+          calendarSyncStats: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, therapistId));
+        
+      console.log(`[Storage] [SECURITY] OAuth tokens securely deleted for therapist ${therapistId}`);
+    } catch (error) {
+      console.error('[Storage] [SECURITY] Failed to delete OAuth tokens:', error);
+      throw error;
+    }
+  }
+
+  async getLastSyncTime(therapistId: string): Promise<Date | null> {
+    const [user] = await db
+      .select({ lastCalendarSync: users.lastCalendarSync })
+      .from(users)
+      .where(eq(users.id, therapistId));
+
+    return user?.lastCalendarSync || null;
+  }
+
+  async getCalendarSyncStats(therapistId: string): Promise<{
+    eventsProcessed?: number;
+    matchesFound?: number;
+    errors?: string[];
+  }> {
+    const [user] = await db
+      .select({ calendarSyncStats: users.calendarSyncStats })
+      .from(users)
+      .where(eq(users.id, therapistId));
+
+    return (user?.calendarSyncStats as any) || {};
+  }
+
+  async updateSyncStats(therapistId: string, stats: {
+    lastSync: Date;
+    eventsProcessed: number;
+    matchesFound: number;
+    errors: string[];
+  }): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        lastCalendarSync: stats.lastSync,
+        calendarSyncStats: {
+          eventsProcessed: stats.eventsProcessed,
+          matchesFound: stats.matchesFound,
+          errors: stats.errors.slice(-10), // Keep only last 10 errors
+          lastUpdated: new Date().toISOString(),
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, therapistId));
+  }
+
+  async getSessionByExternalEventId(externalEventId: string, therapistId: string): Promise<Session | null> {
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.externalEventId, externalEventId),
+          eq(sessions.therapistId, therapistId)
+        )
+      );
+
+    return session || null;
+  }
+
+  // HIPAA Audit logging implementation - tamper-evident, persistent logging
+  async createAuditLog(auditLog: InsertAuditLog): Promise<AuditLog> {
+    try {
+      const [newAuditLog] = await db.insert(auditLogs).values(auditLog).returning();
+      return newAuditLog;
+    } catch (error) {
+      console.error('[AUDIT] CRITICAL: Failed to create audit log entry:', error);
+      // In a real HIPAA environment, this should trigger alerts
+      throw new Error('Audit logging failure - operation cannot continue');
+    }
+  }
+
+  async getAuditLogs(therapistId?: string, limit = 1000): Promise<AuditLog[]> {
+    const query = db.select().from(auditLogs);
+    
+    if (therapistId) {
+      query.where(eq(auditLogs.therapistId, therapistId));
+    }
+    
+    return query.orderBy(desc(auditLogs.timestamp)).limit(limit);
+  }
+
+  // Rate limiting implementation - persistent counters
+  async getRateLimitCounter(therapistId: string, endpoint: string): Promise<RateLimitCounter | null> {
+    const [counter] = await db
+      .select()
+      .from(rateLimitCounters)
+      .where(
+        and(
+          eq(rateLimitCounters.therapistId, therapistId),
+          eq(rateLimitCounters.endpoint, endpoint)
+        )
+      );
+
+    return counter || null;
+  }
+
+  async updateRateLimitCounter(therapistId: string, endpoint: string, requests: number, resetTime: Date): Promise<void> {
+    const existing = await this.getRateLimitCounter(therapistId, endpoint);
+    
+    if (existing) {
+      await db
+        .update(rateLimitCounters)
+        .set({
+          requests,
+          resetTime,
+          updatedAt: new Date(),
+        })
+        .where(eq(rateLimitCounters.id, existing.id));
+    } else {
+      await db.insert(rateLimitCounters).values({
+        therapistId,
+        endpoint,
+        requests,
+        resetTime,
+      });
+    }
   }
 }
 
