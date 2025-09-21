@@ -47,6 +47,8 @@ export const clients = pgTable("clients", {
   location: varchar("location", { length: 200 }),
   emergencyContact: jsonb("emergency_contact"),
   insuranceInfo: jsonb("insurance_info"),
+  // AI integration field
+  aiTags: jsonb("ai_tags"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -65,6 +67,11 @@ export const documents = pgTable("documents", {
   metadata: jsonb("metadata"),
   isProcessed: boolean("is_processed").default(false),
   processingError: text("processing_error"),
+  // AI integration and session linking fields
+  sessionId: uuid("session_id").references(() => sessions.id),
+  analysis: jsonb("analysis"),
+  tags: jsonb("tags"),
+  sourceEventId: text("source_event_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -81,6 +88,10 @@ export const sessions = pgTable("sessions", {
   interventionsUsed: jsonb("interventions_used"),
   homework: text("homework"),
   nextSessionPlan: text("next_session_plan"),
+  // Calendar integration and AI fields
+  externalEventId: text("external_event_id"),
+  sourceCalendar: text("source_calendar"),
+  aiTags: jsonb("ai_tags"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -143,9 +154,13 @@ export const documentsRelations = relations(documents, ({ one }) => ({
     fields: [documents.clientId],
     references: [clients.id],
   }),
+  session: one(sessions, {
+    fields: [documents.sessionId],
+    references: [sessions.id],
+  }),
 }));
 
-export const sessionsRelations = relations(sessions, ({ one }) => ({
+export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   client: one(clients, {
     fields: [sessions.clientId],
     references: [clients.id],
@@ -154,6 +169,7 @@ export const sessionsRelations = relations(sessions, ({ one }) => ({
     fields: [sessions.therapistId],
     references: [users.id],
   }),
+  documents: many(documents),
 }));
 
 export const assessmentsRelations = relations(assessments, ({ one }) => ({
