@@ -16,6 +16,9 @@ export function useDocuments(limit?: number) {
 export function useClientDocuments(clientId: string) {
   return useQuery({
     queryKey: ["/api/documents/client", clientId],
+    queryFn: () => {
+      return fetch(`/api/documents/client/${clientId}`, { credentials: "include" }).then(res => res.json());
+    },
     enabled: !!clientId,
   });
 }
@@ -67,8 +70,12 @@ export function useUploadDocuments() {
 
       return response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      // Also invalidate client-specific documents if uploading for a specific client
+      if (variables.clientId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/documents/client", variables.clientId] });
+      }
       toast({
         title: "Upload Successful",
         description: `${data.results.length} file(s) uploaded and processing`,
