@@ -153,6 +153,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ message: "Server configuration error" });
       }
       
+      // Debug logging to see what's being compared
+      console.log('[DEBUG] Login attempt - Provided password:', JSON.stringify(password));
+      console.log('[DEBUG] Expected password:', JSON.stringify(practicePassword));
+      console.log('[DEBUG] Passwords match:', password === practicePassword);
       
       if (password !== practicePassword) {
         return res.status(401).json({ message: "Invalid password" });
