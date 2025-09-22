@@ -10,7 +10,7 @@ import { ClientProfile } from "@/components/ClientProfile";
 import { CaseConceptualization } from "@/components/CaseConceptualization";
 import { ClientAITags } from "@/components/ClientAITags";
 import { CalendarSync } from "@/components/CalendarSync";
-import { Calendar, Brain, FileText, TrendingUp, Shield, Link2, User, Clock } from "lucide-react";
+import { Calendar, Brain, FileText, TrendingUp, TrendingDown, Shield, Link2, User, Clock, AlertTriangle, Target, Activity, Sparkles } from "lucide-react";
 import { 
   useClient, 
   useClientSessions, 
@@ -24,7 +24,8 @@ import {
   useRecomputeClientInsights,
   useGenerateClientRecommendations,
   useGenerateClientReport,
-  useClientReports
+  useClientReports,
+  useClientAITags
 } from "@/hooks/useAITagging";
 
 export default function ClientChart() {
@@ -44,6 +45,7 @@ export default function ClientChart() {
   const generateRecommendations = useGenerateClientRecommendations(clientId);
   const generateReport = useGenerateClientReport(clientId);
   const { data: reports, isLoading: reportsLoading } = useClientReports(clientId);
+  const { data: clientAITags, isLoading: aiTagsLoading } = useClientAITags(clientId);
 
   if (clientLoading) {
     return (
@@ -175,6 +177,142 @@ export default function ClientChart() {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
+              {/* AI Clinical Summary - Prominently Featured */}
+              <Card className="border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50" data-testid="ai-clinical-summary">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Brain className="w-5 h-5 text-indigo-600" />
+                      <CardTitle className="text-lg">AI Clinical Summary</CardTitle>
+                      <Badge variant="secondary" className="bg-indigo-100 text-indigo-800">
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        AI Analysis
+                      </Badge>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Button variant="outline" size="sm" onClick={() => recomputeInsights.mutate()} disabled={recomputeInsights.isPending}>
+                        {recomputeInsights.isPending ? (
+                          <i className="fas fa-spinner fa-spin mr-1"></i>
+                        ) : (
+                          <i className="fas fa-sync-alt mr-1"></i>
+                        )}
+                        Refresh
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {insightsLoading || aiTagsLoading ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {[...Array(3)].map((_, i) => (
+                        <Skeleton key={i} className="h-24" />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Progress Status */}
+                      <div className="p-4 bg-white rounded-lg border">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-muted-foreground">Progress Status</span>
+                          {clientAITags?.therapyTrajectory?.overallProgress === 'improving' ? (
+                            <TrendingUp className="w-4 h-4 text-green-600" />
+                          ) : clientAITags?.therapyTrajectory?.overallProgress === 'declining' ? (
+                            <TrendingDown className="w-4 h-4 text-red-600" />
+                          ) : (
+                            <Activity className="w-4 h-4 text-blue-600" />
+                          )}
+                        </div>
+                        <div className="text-lg font-semibold">
+                          {clientAITags?.therapyTrajectory?.overallProgress ? (
+                            <span className={
+                              clientAITags.therapyTrajectory.overallProgress === 'improving' ? 'text-green-600' :
+                              clientAITags.therapyTrajectory.overallProgress === 'declining' ? 'text-red-600' :
+                              'text-blue-600'
+                            }>
+                              {clientAITags.therapyTrajectory.overallProgress.replace('_', ' ').toUpperCase()}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">No data</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {clientAITags?.therapyTrajectory?.treatmentPhase || 'Assessment needed'}
+                        </p>
+                      </div>
+
+                      {/* Risk Assessment */}
+                      <div className="p-4 bg-white rounded-lg border">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-muted-foreground">Risk Level</span>
+                          <AlertTriangle className={
+                            clientAITags?.riskProfile?.overallRiskLevel === 'high' || clientAITags?.riskProfile?.overallRiskLevel === 'very_high' ? 
+                            'w-4 h-4 text-red-600' :
+                            clientAITags?.riskProfile?.overallRiskLevel === 'moderate' ?
+                            'w-4 h-4 text-orange-600' :
+                            'w-4 h-4 text-green-600'
+                          } />
+                        </div>
+                        <div className="text-lg font-semibold">
+                          {clientAITags?.riskProfile?.overallRiskLevel ? (
+                            <span className={
+                              clientAITags.riskProfile.overallRiskLevel === 'high' || clientAITags.riskProfile.overallRiskLevel === 'very_high' ? 
+                              'text-red-600' :
+                              clientAITags.riskProfile.overallRiskLevel === 'moderate' ?
+                              'text-orange-600' :
+                              'text-green-600'
+                            }>
+                              {clientAITags.riskProfile.overallRiskLevel.replace('_', ' ').toUpperCase()}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">Unknown</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {clientAITags?.riskProfile?.riskFactors?.length ? 
+                            `${clientAITags.riskProfile.riskFactors.length} risk factor${clientAITags.riskProfile.riskFactors.length !== 1 ? 's' : ''}` : 
+                            'No risk factors identified'}
+                        </p>
+                      </div>
+
+                      {/* Treatment Response */}
+                      <div className="p-4 bg-white rounded-lg border">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-muted-foreground">Treatment Response</span>
+                          <Target className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <div className="text-lg font-semibold text-blue-600">
+                          {clientAITags?.treatmentResponse?.mostEffectiveInterventions?.length ? (
+                            `${clientAITags.treatmentResponse.mostEffectiveInterventions.length} Effective`
+                          ) : (
+                            <span className="text-muted-foreground">Assessing</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {clientAITags?.treatmentResponse?.responseToHomework || 'Response being evaluated'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Key Insights */}
+                  {insights?.summary?.currentStatus && (
+                    <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex items-start space-x-2">
+                        <Brain className="w-4 h-4 text-blue-600 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-blue-800">Key Clinical Insight</p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            Current status: {insights.summary.currentStatus}. 
+                            {insights.assessmentTrends?.overallTrend && ` Assessment trend: ${insights.assessmentTrends.overallTrend}.`}
+                            {insights.treatmentResponse?.barriers?.length ? ` Active barriers: ${insights.treatmentResponse.barriers.slice(0, 2).join(', ')}.` : ''}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               {/* Session Timeline */}
               <Card>
                 <CardHeader>

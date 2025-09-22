@@ -2,8 +2,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { Brain, TrendingUp, TrendingDown, AlertTriangle, Target, Activity, Sparkles } from "lucide-react";
 import { useDashboardStats, useClients, useTodaysSessions } from "@/hooks/useClientData";
 import { useDocuments } from "@/hooks/useDocuments";
+import { AIInsightsDashboard } from "@/components/AIInsightsDashboard";
 import { Link } from "wouter";
 import { formatDateEastern, formatDateTimeEastern, formatTimeEastern } from "@/lib/utils";
 
@@ -47,9 +50,12 @@ export default function Dashboard() {
             <Skeleton key={i} className="h-32" />
           ))}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Skeleton className="lg:col-span-2 h-96" />
+        <div className="space-y-6">
           <Skeleton className="h-96" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Skeleton className="lg:col-span-2 h-96" />
+            <Skeleton className="h-96" />
+          </div>
         </div>
       </div>
     );
@@ -136,6 +142,31 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {/* AI Insights Section - Prominently Featured */}
+      <div className="space-y-4" data-testid="dashboard-ai-insights">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Brain className="w-6 h-6 text-indigo-600" />
+            <h2 className="text-xl font-semibold">AI Clinical Insights</h2>
+            <Badge variant="secondary" className="bg-indigo-100 text-indigo-800">
+              <Activity className="w-3 h-3 mr-1" />
+              Real-time Analysis
+            </Badge>
+          </div>
+          <Link href="/ai/case-insights">
+            <Button variant="outline" size="sm" data-testid="view-detailed-insights">
+              <TrendingUp className="w-4 h-4 mr-2" />
+              View Detailed Insights
+            </Button>
+          </Link>
+        </div>
+        
+        {/* AI Insights Dashboard Component */}
+        <AIInsightsDashboard className="mb-6" />
+        
+        <Separator />
+      </div>
+
       {/* Main Dashboard Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Clients */}
@@ -168,13 +199,61 @@ export default function Dashboard() {
                   <Link key={client.id} href={`/client-chart/${client.id}`}>
                     <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer" data-testid={`recent-client-${client.id}`}>
                       <div className="flex items-center space-x-4">
-                        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                          <span className="text-primary font-medium text-sm">
-                            {client.firstName?.[0]}{client.lastName?.[0]}
-                          </span>
+                        <div className="relative">
+                          <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                            <span className="text-primary font-medium text-sm">
+                              {client.firstName?.[0]}{client.lastName?.[0]}
+                            </span>
+                          </div>
+                          {/* AI Analysis Indicator */}
+                          {client.aiTags && (
+                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center">
+                              <Brain className="w-2 h-2 text-white" />
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <p className="font-medium">{client.firstName} {client.lastName}</p>
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <p className="font-medium">{client.firstName} {client.lastName}</p>
+                            {/* AI Risk Indicator */}
+                            {client.aiTags?.riskProfile?.overallRiskLevel && (
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${
+                                  client.aiTags.riskProfile.overallRiskLevel === 'high' || client.aiTags.riskProfile.overallRiskLevel === 'very_high' ? 
+                                    'border-red-300 text-red-700 bg-red-50' :
+                                  client.aiTags.riskProfile.overallRiskLevel === 'moderate' ?
+                                    'border-orange-300 text-orange-700 bg-orange-50' :
+                                    'border-green-300 text-green-700 bg-green-50'
+                                }`}
+                              >
+                                <AlertTriangle className="w-2 h-2 mr-1" />
+                                {client.aiTags.riskProfile.overallRiskLevel === 'very_high' ? 'Very High' : 
+                                 client.aiTags.riskProfile.overallRiskLevel.replace('_', ' ')}
+                              </Badge>
+                            )}
+                            {/* AI Progress Indicator */}
+                            {client.aiTags?.therapyTrajectory?.overallProgress && (
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${
+                                  client.aiTags.therapyTrajectory.overallProgress === 'improving' ? 
+                                    'border-green-300 text-green-700 bg-green-50' :
+                                  client.aiTags.therapyTrajectory.overallProgress === 'declining' ?
+                                    'border-red-300 text-red-700 bg-red-50' :
+                                    'border-blue-300 text-blue-700 bg-blue-50'
+                                }`}
+                              >
+                                {client.aiTags.therapyTrajectory.overallProgress === 'improving' ? 
+                                  <TrendingUp className="w-2 h-2 mr-1" /> :
+                                 client.aiTags.therapyTrajectory.overallProgress === 'declining' ?
+                                  <TrendingDown className="w-2 h-2 mr-1" /> :
+                                  <Activity className="w-2 h-2 mr-1" />
+                                }
+                                {client.aiTags.therapyTrajectory.overallProgress.replace('_', ' ')}
+                              </Badge>
+                            )}
+                          </div>
                           <p className="text-sm text-muted-foreground">
                             Last updated: {formatDate(client.updatedAt)}
                           </p>
@@ -223,6 +302,20 @@ export default function Dashboard() {
                               {session.clientName}
                             </span>
                           </Link>
+                          {/* AI Session Analysis Indicator */}
+                          {session.aiTags && (
+                            <Badge variant="secondary" className="bg-purple-100 text-purple-700 text-xs">
+                              <Brain className="w-2 h-2 mr-1" />
+                              AI Analyzed
+                            </Badge>
+                          )}
+                          {/* Risk Alert for High-Risk Sessions */}
+                          {session.aiTags?.riskFactors?.suicideRisk && (session.aiTags.riskFactors.suicideRisk === 'high' || session.aiTags.riskFactors.suicideRisk === 'moderate') && (
+                            <Badge variant="destructive" className="text-xs">
+                              <AlertTriangle className="w-2 h-2 mr-1" />
+                              Risk Alert
+                            </Badge>
+                          )}
                           {session.sourceCalendar && (
                             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200" data-testid={`calendar-badge-${session.id}`}>
                               From Calendar
