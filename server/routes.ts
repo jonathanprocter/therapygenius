@@ -137,30 +137,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ message: "Logged out successfully" });
   });
 
-  // Simple password-only login for single-therapist practice
+  // Simple password-only login for single-therapist practice - PASSWORD REMOVED FOR DIRECT ACCESS
   app.post("/api/auth/simple-login", async (req, res) => {
     try {
-      const { password } = req.body;
-      
-      if (!password) {
-        return res.status(400).json({ message: "Password required" });
-      }
-
-      // SECURITY FIX: Require strong practice password from environment
-      const practicePassword = process.env.PRACTICE_PASSWORD;
-      if (!practicePassword) {
-        console.error('[SECURITY] PRACTICE_PASSWORD environment variable not set');
-        return res.status(500).json({ message: "Server configuration error" });
-      }
-      
-      // Debug logging to see what's being compared
-      console.log('[DEBUG] Login attempt - Provided password:', JSON.stringify(password));
-      console.log('[DEBUG] Expected password:', JSON.stringify(practicePassword));
-      console.log('[DEBUG] Passwords match:', password === practicePassword);
-      
-      if (password !== practicePassword) {
-        return res.status(401).json({ message: "Invalid password" });
-      }
+      // PASSWORD AUTHENTICATION REMOVED - Direct access granted
 
       // Get the first/only therapist user
       const therapist = await storage.getUserByUsername("jonathan.procter@gmail.com");
