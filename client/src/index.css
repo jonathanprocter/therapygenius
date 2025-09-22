@@ -125,9 +125,19 @@
   }
 
   /* Touch-friendly elements */
-  button, a, input, select, textarea {
+  button, a {
     -webkit-user-select: none;
     user-select: none;
+    /* Minimum touch target size for iOS */
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Form controls need text selection enabled for iOS */
+  input, select, textarea {
+    /* Re-enable text selection for form controls on iOS */
+    -webkit-user-select: text;
+    user-select: text;
     /* Minimum touch target size for iOS */
     min-height: 44px;
     min-width: 44px;

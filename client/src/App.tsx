@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Link, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -143,7 +143,7 @@ function MobileNavigation({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
           <ul className="space-y-2 mb-8">
             {navigationItems.map((item) => (
               <li key={item.path}>
-                <a
+                <Link
                   href={item.path}
                   onClick={onClose}
                   className="mobile-nav-item text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -151,7 +151,7 @@ function MobileNavigation({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                 >
                   <i className={`${item.icon} w-5 mr-4`}></i>
                   <span className="font-medium">{item.label}</span>
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
@@ -162,7 +162,7 @@ function MobileNavigation({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
             <ul className="space-y-2">
               {aiToolsItems.map((item) => (
                 <li key={item.path}>
-                  <a
+                  <Link
                     href={item.path}
                     onClick={onClose}
                     className="mobile-nav-item text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -170,7 +170,7 @@ function MobileNavigation({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                   >
                     <i className={`${item.icon} w-5 mr-4`}></i>
                     <span className="font-medium">{item.label}</span>
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -245,18 +245,18 @@ function MainApp() {
         {isMobile && (
           <nav className="bg-card border-t border-border safe-area-bottom" data-testid="mobile-bottom-nav">
             <div className="flex justify-around py-2">
-              <a href="/" className="flex flex-col items-center py-2 px-4 text-primary" data-testid="bottom-nav-dashboard">
+              <Link href="/" className="flex flex-col items-center py-2 px-4 text-primary" data-testid="bottom-nav-dashboard">
                 <i className="fas fa-chart-line text-lg mb-1"></i>
                 <span className="text-xs font-medium">Dashboard</span>
-              </a>
-              <a href="/clients" className="flex flex-col items-center py-2 px-4 text-muted-foreground hover:text-foreground transition-colors" data-testid="bottom-nav-clients">
+              </Link>
+              <Link href="/clients" className="flex flex-col items-center py-2 px-4 text-muted-foreground hover:text-foreground transition-colors" data-testid="bottom-nav-clients">
                 <i className="fas fa-users text-lg mb-1"></i>
                 <span className="text-xs font-medium">Clients</span>
-              </a>
-              <a href="/documents" className="flex flex-col items-center py-2 px-4 text-muted-foreground hover:text-foreground transition-colors" data-testid="bottom-nav-documents">
+              </Link>
+              <Link href="/documents" className="flex flex-col items-center py-2 px-4 text-muted-foreground hover:text-foreground transition-colors" data-testid="bottom-nav-documents">
                 <i className="fas fa-file-medical text-lg mb-1"></i>
                 <span className="text-xs font-medium">Documents</span>
-              </a>
+              </Link>
               <button 
                 className="flex flex-col items-center py-2 px-4 text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="bottom-nav-new-session"
