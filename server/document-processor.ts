@@ -5,6 +5,9 @@ import { Request } from "express";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import { aiRouter } from "./ai";
+import { storage } from "./storage";
+import { analyzeDocument, extractCalendarContext, analyzeDocumentForSessionMatching, createDeterministicAnalysis } from "./documentTagger";
+import { Document, Session } from "@shared/schema";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
@@ -18,7 +21,7 @@ export const ensureUploadDir = async () => {
 };
 
 // Configure multer for file uploads
-const storage = multer.diskStorage({
+const multerStorage = multer.diskStorage({
   destination: async (req, file, cb) => {
     await ensureUploadDir();
     const therapistDir = path.join(UPLOAD_DIR, (req as any).userId || "unknown");
@@ -49,7 +52,7 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 };
 
 export const upload = multer({
-  storage,
+  storage: multerStorage,
   fileFilter,
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB
@@ -63,6 +66,40 @@ export interface ProcessedDocument {
     wordCount: number;
     extractionMethod: "pdf-parse" | "mammoth" | "ocr" | "text";
   };
+}
+
+export interface AutoLinkingResult {
+  documentId: string;
+  sessionMatch?: {
+    sessionId: string;
+    confidence: number;
+    matchReason: string;
+    session: Session;
+  };
+  analysisResults?: {
+    category: string;
+    tags: string[];
+    keyInsights: string[];
+    clientMatch?: {
+      clientId: string;
+      confidence: number;
+    };
+  };
+  potentialMatches: Array<{
+    sessionId: string;
+    confidence: number;
+    matchReason: string;
+  }>;
+  processingStatus: "success" | "partial" | "failed";
+  errors?: string[];
+}
+
+export interface DocumentUploadContext {
+  therapistId: string;
+  clientId?: string;
+  sessionId?: string;
+  sourceEventId?: string;
+  manualClientOverride?: boolean;
 }
 
 export const extractTextFromFile = async (filePath: string, mimeType: string): Promise<ProcessedDocument> => {
@@ -136,7 +173,16 @@ const extractFromText = async (buffer: Buffer): Promise<ProcessedDocument> => {
 };
 
 const extractFromImage = async (buffer: Buffer): Promise<ProcessedDocument> => {
+  const isHIPAACompliant = process.env.HIPAA_SAFE_AI === 'true';
+  
+  if (!isHIPAACompliant) {
+    // HIPAA Compliance: Reject image uploads when external AI is disabled
+    console.error('[Document Processor] Image OCR blocked: HIPAA_SAFE_AI is disabled. Image uploads require external AI for OCR processing.');
+    throw new Error('Image uploads are not supported when HIPAA-safe AI is disabled. Please enable HIPAA_SAFE_AI=true to process image documents, or convert your image to text format.');
+  }
+
   try {
+    console.log('[Document Processor] Processing image with AI OCR (HIPAA_SAFE_AI enabled)');
     const content = await aiRouter.ocrImage(buffer);
     
     return {
@@ -165,4 +211,430 @@ export const getFileMimeType = (filename: string): string => {
   };
   
   return mimeTypes[ext] || "application/octet-stream";
+};
+
+/**
+ * Main function to process a document with intelligent auto-linking
+ * Integrates document processing, AI analysis, and session matching
+ */
+export const processDocumentWithAutoLinking = async (
+  document: Document,
+  context: DocumentUploadContext
+): Promise<AutoLinkingResult> => {
+  const result: AutoLinkingResult = {
+    documentId: document.id,
+    potentialMatches: [],
+    processingStatus: "success",
+    errors: []
+  };
+
+  try {
+    console.log(`[Document Processor] Starting auto-linking for document ${document.id}`);
+
+    // Step 1: Enhanced AI Analysis with HIPAA fallback
+    let analysisResults;
+    try {
+      const isHIPAACompliant = process.env.HIPAA_SAFE_AI === 'true';
+      
+      if (isHIPAACompliant) {
+        // Use AI analysis when HIPAA compliant
+        analysisResults = await analyzeDocument(document, context.therapistId);
+      } else {
+        // Fallback to deterministic analysis when HIPAA AI is disabled
+        console.log('[Document Processor] Using deterministic fallback analysis (HIPAA AI disabled)');
+        analysisResults = createDeterministicAnalysis(document, context);
+      }
+      
+      result.analysisResults = analysisResults;
+      
+      // Update document with analysis results
+      await storage.updateDocumentAnalysis(
+        document.id,
+        analysisResults,
+        { 
+          category: analysisResults.category,
+          tags: analysisResults.tags,
+          keyInsights: analysisResults.keyInsights
+        },
+        context.therapistId
+      );
+    } catch (error) {
+      console.error('[Document Processor] Analysis failed:', error);
+      result.errors?.push(`Analysis failed: ${error instanceof Error ? error.message : String(error)}`);
+      result.processingStatus = "partial";
+      
+      // Fallback to basic analysis on error
+      try {
+        console.log('[Document Processor] Attempting fallback analysis after error');
+        analysisResults = createDeterministicAnalysis(document, context);
+        result.analysisResults = analysisResults;
+      } catch (fallbackError) {
+        console.error('[Document Processor] Fallback analysis also failed:', fallbackError);
+      }
+    }
+
+    // Step 2: Session Matching
+    try {
+      // Use explicit session if provided
+      if (context.sessionId) {
+        const targetSession = await storage.getSessionById(context.sessionId, context.therapistId);
+        
+        if (targetSession) {
+          await storage.linkDocumentToSession(document.id, context.sessionId, context.therapistId, 1.0);
+          result.sessionMatch = {
+            sessionId: context.sessionId,
+            confidence: 1.0,
+            matchReason: 'Manual session specification',
+            session: targetSession
+          };
+        } else {
+          result.errors?.push(`Session ${context.sessionId} not found or does not belong to therapist`);
+          result.processingStatus = "partial";
+        }
+      } else {
+        // Perform intelligent session matching using exported function
+        const potentialSessions = await storage.findPotentialSessionMatches(
+          document.id,
+          context.therapistId,
+          48
+        );
+        let sessionMatches;
+        const isHIPAACompliant = process.env.HIPAA_SAFE_AI === 'true';
+        
+        if (isHIPAACompliant) {
+          // Use AI-enhanced session matching when HIPAA compliant
+          sessionMatches = await analyzeDocumentForSessionMatching(
+            document,
+            potentialSessions.map(m => ({
+              id: m.session.id,
+              sessionDate: m.session.sessionDate,
+              notes: m.session.notes,
+              sessionType: m.session.sessionType
+            })),
+            context.therapistId
+          );
+        } else {
+          // Fallback to deterministic session matching when HIPAA AI is disabled
+          console.log('[Document Processor] Using deterministic session matching (HIPAA AI disabled)');
+          sessionMatches = createDeterministicSessionMatching(document, potentialSessions, context);
+        }
+        const matches = sessionMatches.map(match => {
+          const originalSession = potentialSessions.find(p => p.session.id === match.sessionId);
+          return {
+            session: originalSession!.session,
+            confidence: match.confidence,
+            matchReason: match.matchReason
+          };
+        }).filter(m => m.session); // Filter out any null sessions
+        result.potentialMatches = matches.map(m => ({
+          sessionId: m.session.id,
+          confidence: m.confidence,
+          matchReason: m.matchReason
+        }));
+
+        // Auto-link if high confidence match (>= 0.8)
+        const bestMatch = matches[0];
+        if (bestMatch && bestMatch.confidence >= 0.8) {
+          await storage.linkDocumentToSession(
+            document.id,
+            bestMatch.session.id,
+            context.therapistId,
+            bestMatch.confidence
+          );
+          result.sessionMatch = {
+            sessionId: bestMatch.session.id,
+            confidence: bestMatch.confidence,
+            matchReason: bestMatch.matchReason,
+            session: bestMatch.session
+          };
+          console.log(`[Document Processor] Auto-linked to session ${bestMatch.session.id} with confidence ${bestMatch.confidence}`);
+        }
+      }
+    } catch (error) {
+      console.error('[Document Processor] Session matching failed:', error);
+      result.errors?.push(`Session matching failed: ${error instanceof Error ? error.message : String(error)}`);
+      result.processingStatus = "partial";
+    }
+
+    // Step 3: Calendar Context Integration
+    try {
+      if (context.sourceEventId) {
+        const calendarContext = await extractCalendarContext(context.sourceEventId, context.therapistId);
+        if (calendarContext) {
+          // Update document with calendar context
+          await storage.updateDocument(document.id, {
+            sourceEventId: context.sourceEventId,
+            analysis: {
+              ...(result.analysisResults || {}),
+              calendarContext
+            }
+          }, context.therapistId);
+        }
+      }
+    } catch (error) {
+      console.error('[Document Processor] Calendar context extraction failed:', error);
+      result.errors?.push(`Calendar context failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    console.log(`[Document Processor] Auto-linking completed for document ${document.id} with status: ${result.processingStatus}`);
+    return result;
+
+  } catch (error) {
+    console.error('[Document Processor] Critical error in auto-linking:', error);
+    result.processingStatus = "failed";
+    result.errors?.push(`Critical error: ${error instanceof Error ? error.message : String(error)}`);
+    return result;
+  }
+};
+
+/**
+ * DEPRECATED: Use analyzeDocumentForSessionMatching from documentTagger.ts instead
+ * This function is kept for backward compatibility but should not be used in new code
+ */
+export const performIntelligentSessionMatching = async (
+  document: Document,
+  context: DocumentUploadContext,
+  timeWindowHours: number = 48
+): Promise<Array<{
+  session: Session;
+  confidence: number;
+  matchReason: string;
+}>> => {
+  console.warn('[Document Processor] Using deprecated performIntelligentSessionMatching. Use analyzeDocumentForSessionMatching instead.');
+  
+  try {
+    // Get potential matches from storage
+    const potentialMatches = await storage.findPotentialSessionMatches(
+      document.id,
+      context.therapistId,
+      timeWindowHours
+    );
+
+    // Use the exported function from documentTagger.ts
+    const sessionMatches = await analyzeDocumentForSessionMatching(
+      document,
+      potentialMatches.map(m => ({
+        id: m.session.id,
+        sessionDate: m.session.sessionDate,
+        notes: m.session.notes,
+        sessionType: m.session.sessionType
+      })),
+      context.therapistId
+    );
+
+    // Convert back to expected format
+    return sessionMatches.map(match => {
+      const originalSession = potentialMatches.find(p => p.session.id === match.sessionId);
+      return {
+        session: originalSession!.session,
+        confidence: match.confidence,
+        matchReason: match.matchReason
+      };
+    }).filter(m => m.session);
+  } catch (error) {
+    console.error('[Document Processor] Error in session matching:', error);
+    return [];
+  }
+};
+
+/**
+ * AI-enhanced session matching using document content analysis
+ */
+const performAIEnhancedMatching = async (
+  document: Document,
+  potentialMatches: Array<{
+    session: Session;
+    confidence: number;
+    matchReason: string;
+  }>,
+  therapistId: string
+): Promise<Array<{
+  session: Session;
+  confidence: number;
+  matchReason: string;
+}>> => {
+  try {
+    if (potentialMatches.length === 0) return [];
+
+    // Use AI to analyze document content and match against session notes
+    const sessionAnalysisPrompt = `
+You are analyzing a therapy document to match it with potential therapy sessions. 
+
+Document content (first 2000 chars): ${document.content?.substring(0, 2000)}
+
+Potential sessions:
+${potentialMatches.map((match, idx) => `
+${idx + 1}. Session Date: ${match.session.sessionDate.toLocaleDateString()}
+   Session Type: ${match.session.sessionType || 'Not specified'}
+   Notes: ${match.session.notes?.substring(0, 500) || 'No notes'}
+   Current confidence: ${match.confidence}
+`).join('\n')}
+
+Analyze the document content and provide confidence scores (0-1) for each potential session match.
+Consider:
+1. Topic alignment between document and session notes
+2. Therapy concepts and interventions mentioned
+3. Timeline and context clues
+4. Client-specific information
+
+Respond with JSON array of confidence adjustments:
+[
+  {
+    "sessionIndex": 0,
+    "adjustedConfidence": 0.95,
+    "reasoning": "Strong topic alignment with CBT techniques mentioned in both"
+  }
+]
+`;
+
+    const aiAnalysis = await aiRouter.chatJSON(
+      [{ role: "user", content: sessionAnalysisPrompt }],
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            sessionIndex: { type: "number" },
+            adjustedConfidence: { type: "number", minimum: 0, maximum: 1 },
+            reasoning: { type: "string" }
+          },
+          required: ["sessionIndex", "adjustedConfidence", "reasoning"]
+        }
+      } as any,
+      {
+        systemPrompt: "You are a specialized AI for matching therapy documents to sessions. Always respond with valid JSON.",
+        maxTokens: 1000
+      }
+    );
+
+    // Apply AI adjustments to confidence scores
+    const enhancedMatches = potentialMatches.map((match, idx) => {
+      const aiAdjustment = (aiAnalysis as any[]).find(adj => adj.sessionIndex === idx);
+      if (aiAdjustment) {
+        return {
+          ...match,
+          confidence: Math.min(1.0, aiAdjustment.adjustedConfidence),
+          matchReason: `${match.matchReason}, AI: ${aiAdjustment.reasoning}`
+        };
+      }
+      return match;
+    });
+
+    return enhancedMatches.sort((a, b) => b.confidence - a.confidence);
+
+  } catch (error) {
+    console.error('[Document Processor] AI-enhanced matching failed:', error);
+    return potentialMatches; // Fall back to original matches
+  }
+};
+
+/**
+ * Extract calendar context from source event
+ */
+const extractCalendarContext = async (sourceEventId: string, therapistId: string) => {
+  try {
+    const session = await storage.getSessionByExternalEventId(sourceEventId, therapistId);
+    if (session) {
+      return {
+        calendarEventId: sourceEventId,
+        linkedSessionId: session.id,
+        sessionDate: session.sessionDate,
+        sourceCalendar: session.sourceCalendar,
+        extractedAt: new Date().toISOString()
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('[Document Processor] Error extracting calendar context:', error);
+    return null;
+  }
+};
+
+/**
+ * Enhanced document analysis specifically for linking purposes
+ */
+const analyzeDocumentForLinking = async (document: Document, therapistId: string) => {
+  try {
+    // Use existing document analysis but enhance with linking-specific analysis
+    const analysis = await analyzeDocument(document, therapistId);
+    
+    // Add linking-specific enhancements
+    return {
+      ...analysis,
+      linkingMetadata: {
+        processedAt: new Date().toISOString(),
+        processingVersion: "1.0.0",
+        confidence: 0.8, // Default confidence for AI analysis
+        method: "ai-enhanced"
+      }
+    };
+  } catch (error) {
+    console.error('[Document Processor] Error in document analysis for linking:', error);
+    throw error;
+  }
+};
+
+
+/**
+ * Create deterministic session matching when AI is disabled
+ * Uses basic heuristics for session matching without external AI
+ */
+const createDeterministicSessionMatching = (
+  document: Document,
+  potentialSessions: Array<{ session: any; confidence: number; matchReason: string }>,
+  context: DocumentUploadContext
+) => {
+  if (potentialSessions.length === 0) return [];
+  
+  return potentialSessions.map(match => {
+    let confidence = match.confidence;
+    let matchReason = match.matchReason;
+    const matchingFactors = [];
+    
+    // Boost confidence for temporal proximity
+    const uploadDate = document.uploadDate || document.createdAt;
+    const sessionDate = match.session.sessionDate;
+    const timeDiffHours = Math.abs(uploadDate.getTime() - sessionDate.getTime()) / (1000 * 60 * 60);
+    
+    if (timeDiffHours <= 24) {
+      confidence += 0.3;
+      matchingFactors.push('Recent temporal proximity (within 24 hours)');
+    } else if (timeDiffHours <= 48) {
+      confidence += 0.2;
+      matchingFactors.push('Temporal proximity (within 48 hours)');
+    }
+    
+    // Boost confidence for client match
+    if (context.clientId && match.session.clientId === context.clientId) {
+      confidence += 0.2;
+      matchingFactors.push('Client ID match');
+    }
+    
+    // Basic content-based matching if document has content
+    if (document.content && match.session.notes) {
+      const contentWords = document.content.toLowerCase().split(/\W+/);
+      const sessionWords = match.session.notes.toLowerCase().split(/\W+/);
+      const commonWords = contentWords.filter(word => 
+        word.length > 3 && sessionWords.includes(word)
+      );
+      
+      if (commonWords.length >= 3) {
+        confidence += 0.1;
+        matchingFactors.push(`Content similarity (${commonWords.length} common terms)`);
+      }
+    }
+    
+    // Cap confidence at 1.0
+    confidence = Math.min(confidence, 1.0);
+    
+    return {
+      sessionId: match.session.id,
+      confidence,
+      matchReason: matchingFactors.length > 0 
+        ? `Deterministic matching: ${matchingFactors.join(', ')}`
+        : 'Basic heuristic matching',
+      matchingFactors
+    };
+  }).filter(match => match.confidence > 0.3)
+    .sort((a, b) => b.confidence - a.confidence);
 };

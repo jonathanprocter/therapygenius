@@ -1,0 +1,41 @@
+Clinical Assessment Report
+Date: January 10, 2025
+Client: Alice Johnson
+Assessor: Dr. Sarah Johnson
+
+Presenting Concerns:
+Client reports persistent anxiety symptoms interfering with work performance and social relationships. Symptoms include racing thoughts, physical tension, and avoidance behaviors.
+
+Mental Status Examination:
+- Appearance: Well-groomed, appropriate dress
+- Mood: Anxious, somewhat dysthymic
+- Affect: Congruent with stated mood
+- Speech: Normal rate and volume
+- Thought process: Linear, goal-directed
+- Thought content: Worries about work performance, no suicidal ideation
+- Perceptual disturbances: None reported
+- Cognition: Intact orientation, memory, and concentration
+- Insight: Good insight into anxiety symptoms
+- Judgment: Fair to good
+
+Diagnostic Impressions:
+- Primary: Generalized Anxiety Disorder (F41.1)
+- Secondary: Adjustment Disorder with Anxiety (F43.22)
+
+Risk Factors:
+- Work-related stress
+- Perfectionist tendencies
+- Limited coping strategies
+
+Protective Factors:
+- Strong family support system
+- Motivated for treatment
+- Good insight and cognitive abilities
+
+Treatment Recommendations:
+- Weekly individual psychotherapy using CBT approach
+- Anxiety management skills training
+- Possible psychiatric consultation for medication evaluation
+- Regular assessment of progress
+
+Assessment completed by Dr. Sarah Johnson, Licensed Clinical Psychologist

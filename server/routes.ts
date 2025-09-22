@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { requireAuth, generateToken, type AuthenticatedRequest } from "./auth";
-import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir } from "./document-processor";
-import { analyzeDocument, generateCaseConceptualization } from "./documentTagger";
+import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir, processDocumentWithAutoLinking, DocumentUploadContext } from "./document-processor";
+import { analyzeDocument, generateCaseConceptualization, analyzeDocumentForSessionMatching, extractCalendarContext, generateAutoLinkingMetadata } from "./documentTagger";
 import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } from "./document-fix";
 import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema } from "@shared/schema";
 import { z } from "zod";
@@ -327,11 +327,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No files uploaded" });
       }
 
+      // Pre-validate image uploads when HIPAA AI is disabled
+      const isHIPAACompliant = process.env.HIPAA_SAFE_AI === 'true';
+      if (!isHIPAACompliant) {
+        const imageFiles = files.filter(file => {
+          const mimeType = getFileMimeType(file.originalname);
+          return mimeType.startsWith("image/");
+        });
+        
+        if (imageFiles.length > 0) {
+          const imageFileNames = imageFiles.map(f => f.originalname).join(", ");
+          console.warn(`[Upload] Rejected image uploads due to HIPAA compliance: ${imageFileNames}`);
+          return res.status(422).json({ 
+            message: "Image uploads are not supported when HIPAA-safe AI is disabled. Please enable HIPAA_SAFE_AI=true to process image documents, or convert your images to text format.",
+            rejectedFiles: imageFileNames,
+            code: "HIPAA_IMAGE_UPLOAD_BLOCKED"
+          });
+        }
+      }
+
       const clientId = req.body.clientId || null;
+      const sessionId = req.body.sessionId || null;
+      const sourceEventId = req.body.sourceEventId || null;
+      const manualClientOverride = req.body.manualClientOverride === 'true';
       const results = [];
 
       for (const file of files) {
         try {
+          console.log(`[Upload] Processing file: ${file.originalname}`);
+          
           // Create document record
           const document = await storage.createDocument({
             therapistId: req.userId!,
@@ -342,40 +366,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
             filePath: file.path,
           });
 
-          results.push({
-            id: document.id,
-            fileName: document.fileName,
-            status: "uploaded",
-          });
+          // Process document synchronously to return full AutoLinkingResult
+          try {
+            const mimeType = getFileMimeType(file.originalname);
+            const processed = await extractTextFromFile(file.path, mimeType);
+            
+            // Update document with extracted content first
+            const updatedDocument = await storage.updateDocument(document.id, {
+              content: processed.content,
+              metadata: processed.metadata,
+              isProcessed: true,
+            }, req.userId!);
 
-          // Process document asynchronously
-          setImmediate(async () => {
-            try {
-              const mimeType = getFileMimeType(file.originalname);
-              const processed = await extractTextFromFile(file.path, mimeType);
+            if (updatedDocument) {
+              // Perform intelligent auto-linking and return full result
+              const context: DocumentUploadContext = {
+                therapistId: req.userId!,
+                clientId,
+                sessionId,
+                sourceEventId,
+                manualClientOverride
+              };
+
+              const autoLinkingResult = await processDocumentWithAutoLinking(updatedDocument, context);
               
-              const analysis = await analyzeDocument({
-                ...document,
-                content: processed.content,
-              }, req.userId!);
+              console.log(`[Upload] Document ${document.fileName} processed with auto-linking:`, {
+                status: autoLinkingResult.processingStatus,
+                sessionMatch: autoLinkingResult.sessionMatch ? `Session ${autoLinkingResult.sessionMatch.sessionId} (${autoLinkingResult.sessionMatch.confidence})` : 'No match',
+                potentialMatches: autoLinkingResult.potentialMatches.length
+              });
 
-              await storage.updateDocument(document.id, {
-                content: processed.content,
-                metadata: {
-                  ...processed.metadata,
-                  analysis,
-                },
-                isProcessed: true,
-              }, req.userId!);
-
-              console.log(`Document processed: ${document.fileName}`);
-            } catch (error) {
-              console.error(`Failed to process document ${document.fileName}:`, error);
-              await storage.updateDocument(document.id, {
-                processingError: error instanceof Error ? error.message : String(error),
-              }, req.userId!);
+              // Return full AutoLinkingResult payload as required
+              results.push({
+                id: document.id,
+                fileName: document.fileName,
+                status: "success",
+                autoLinkingResult: {
+                  documentId: autoLinkingResult.documentId,
+                  sessionMatch: autoLinkingResult.sessionMatch,
+                  analysisResults: autoLinkingResult.analysisResults,
+                  potentialMatches: autoLinkingResult.potentialMatches,
+                  processingStatus: autoLinkingResult.processingStatus,
+                  errors: autoLinkingResult.errors
+                }
+              });
+            } else {
+              throw new Error('Failed to update document with extracted content');
             }
-          });
+          } catch (processingError) {
+            console.error(`Failed to process document ${document.fileName}:`, processingError);
+            
+            // Update document with processing error
+            await storage.updateDocument(document.id, {
+              processingError: processingError instanceof Error ? processingError.message : String(processingError),
+            }, req.userId!);
+
+            // Return partial result with error details
+            results.push({
+              id: document.id,
+              fileName: document.fileName,
+              status: "failed",
+              autoLinkingResult: {
+                documentId: document.id,
+                potentialMatches: [],
+                processingStatus: "failed",
+                errors: [processingError instanceof Error ? processingError.message : String(processingError)]
+              }
+            });
+          }
         } catch (error) {
           console.error(`Failed to create document record for ${file.originalname}:`, error);
           results.push({
@@ -386,7 +444,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      res.json({ results });
+      // Return appropriate HTTP status based on results
+      const hasErrors = results.some(r => r.status === "error");
+      const hasFailed = results.some(r => r.status === "failed");
+      
+      if (hasErrors && results.length === 1) {
+        // Single file with creation error - return 400
+        res.status(400).json({ results });
+      } else if (hasFailed || hasErrors) {
+        // Some files failed processing - return 207 (Multi-Status)
+        res.status(207).json({ results });
+      } else {
+        // All successful - return 200
+        res.json({ results });
+      }
     } catch (error) {
       console.error("Error uploading documents:", error);
       res.status(500).json({ message: "Failed to upload documents" });
@@ -406,11 +477,251 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Enhanced Document-Session Linking Endpoints
+
+  // Get potential session matches for a document
+  app.get("/api/documents/:id/potential-matches", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const timeWindowHours = req.query.timeWindowHours ? parseInt(req.query.timeWindowHours as string) : 48;
+      const potentialMatches = await storage.findPotentialSessionMatches(req.params.id, req.userId!, timeWindowHours);
+      res.json({ potentialMatches });
+    } catch (error) {
+      console.error("Error finding potential session matches:", error);
+      res.status(500).json({ message: "Failed to find potential session matches" });
+    }
+  });
+
+  // Manually link a document to a session
+  app.post("/api/documents/:id/link-session", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionId, confidence } = req.body;
+      
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+
+      const linkedDocument = await storage.linkDocumentToSession(
+        req.params.id,
+        sessionId,
+        req.userId!,
+        confidence
+      );
+
+      if (!linkedDocument) {
+        return res.status(404).json({ message: "Document or session not found" });
+      }
+
+      res.json({ 
+        message: "Document linked to session successfully", 
+        document: linkedDocument 
+      });
+    } catch (error) {
+      console.error("Error linking document to session:", error);
+      res.status(500).json({ message: "Failed to link document to session" });
+    }
+  });
+
+  // Unlink a document from its session
+  app.post("/api/documents/:id/unlink-session", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const unlinkedDocument = await storage.unlinkDocumentFromSession(req.params.id, req.userId!);
+
+      if (!unlinkedDocument) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      res.json({ 
+        message: "Document unlinked from session successfully", 
+        document: unlinkedDocument 
+      });
+    } catch (error) {
+      console.error("Error unlinking document from session:", error);
+      res.status(500).json({ message: "Failed to unlink document from session" });
+    }
+  });
+
+  // Get documents by session
+  app.get("/api/sessions/:sessionId/documents", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const documents = await storage.getDocumentsBySession(req.params.sessionId, req.userId!);
+      res.json(documents);
+    } catch (error) {
+      console.error("Error fetching session documents:", error);
+      res.status(500).json({ message: "Failed to fetch session documents" });
+    }
+  });
+
+  // Get unlinked documents (for manual linking interface)
+  app.get("/api/documents/unlinked", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const unlinkedDocuments = await storage.getUnlinkedDocuments(req.userId!, limit);
+      res.json(unlinkedDocuments);
+    } catch (error) {
+      console.error("Error fetching unlinked documents:", error);
+      res.status(500).json({ message: "Failed to fetch unlinked documents" });
+    }
+  });
+
+  // Enhanced AI analysis for document-session matching
+  app.post("/api/documents/:id/analyze-session-matches", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { potentialSessionIds } = req.body;
+      
+      if (!potentialSessionIds || !Array.isArray(potentialSessionIds)) {
+        return res.status(400).json({ message: "Array of potential session IDs is required" });
+      }
+
+      const document = await storage.getDocumentById(req.params.id, req.userId!);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      // Get session details for analysis
+      const potentialSessions = [];
+      for (const sessionId of potentialSessionIds) {
+        const sessionData = await storage.getSessionsByClient('', req.userId!); // Will be filtered by session ID logic
+        const session = sessionData.find(s => s.id === sessionId);
+        if (session) {
+          potentialSessions.push({
+            id: session.id,
+            sessionDate: session.sessionDate,
+            notes: session.notes,
+            sessionType: session.sessionType
+          });
+        }
+      }
+
+      const analysisResults = await analyzeDocumentForSessionMatching(
+        document,
+        potentialSessions,
+        req.userId!
+      );
+
+      res.json({ analysisResults });
+    } catch (error) {
+      console.error("Error analyzing session matches:", error);
+      res.status(500).json({ message: "Failed to analyze session matches" });
+    }
+  });
+
+  // Extract calendar context from document
+  app.post("/api/documents/:id/extract-calendar-context", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const document = await storage.getDocumentById(req.params.id, req.userId!);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      const calendarContext = await extractCalendarContext(document, req.userId!);
+      res.json({ calendarContext });
+    } catch (error) {
+      console.error("Error extracting calendar context:", error);
+      res.status(500).json({ message: "Failed to extract calendar context" });
+    }
+  });
+
+  // Generate auto-linking metadata and recommendations
+  app.get("/api/documents/:id/auto-linking-metadata", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const document = await storage.getDocumentById(req.params.id, req.userId!);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      if (!document.analysis) {
+        return res.status(400).json({ message: "Document has not been analyzed yet" });
+      }
+
+      const autoLinkingMetadata = await generateAutoLinkingMetadata(
+        document,
+        document.analysis as any,
+        req.userId!
+      );
+
+      res.json({ autoLinkingMetadata });
+    } catch (error) {
+      console.error("Error generating auto-linking metadata:", error);
+      res.status(500).json({ message: "Failed to generate auto-linking metadata" });
+    }
+  });
+
+  // Bulk re-analyze documents for auto-linking
+  app.post("/api/documents/bulk-reanalyze", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { documentIds, includeLinked } = req.body;
+      
+      if (!documentIds || !Array.isArray(documentIds)) {
+        return res.status(400).json({ message: "Array of document IDs is required" });
+      }
+
+      const results = [];
+      
+      for (const documentId of documentIds) {
+        try {
+          const document = await storage.getDocumentById(documentId, req.userId!);
+          if (!document) {
+            results.push({ documentId, status: 'not_found' });
+            continue;
+          }
+
+          // Skip already linked documents unless specifically requested
+          if (document.sessionId && !includeLinked) {
+            results.push({ documentId, status: 'skipped_linked' });
+            continue;
+          }
+
+          // Re-analyze with auto-linking
+          const context: DocumentUploadContext = {
+            therapistId: req.userId!,
+            clientId: document.clientId || undefined
+          };
+
+          const autoLinkingResult = await processDocumentWithAutoLinking(document, context);
+          results.push({ 
+            documentId, 
+            status: autoLinkingResult.processingStatus,
+            sessionMatch: autoLinkingResult.sessionMatch,
+            potentialMatches: autoLinkingResult.potentialMatches.length
+          });
+        } catch (error) {
+          results.push({ 
+            documentId, 
+            status: 'error', 
+            error: error instanceof Error ? error.message : String(error) 
+          });
+        }
+      }
+
+      res.json({ results });
+    } catch (error) {
+      console.error("Error bulk re-analyzing documents:", error);
+      res.status(500).json({ message: "Failed to bulk re-analyze documents" });
+    }
+  });
+
   // Session routes
   app.get("/api/sessions/client/:clientId", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
+      const includeDocuments = req.query.includeDocuments === 'true';
       const sessions = await storage.getSessionsByClient(req.params.clientId, req.userId!);
-      res.json(sessions);
+      
+      if (includeDocuments) {
+        // Enhance sessions with linked document information
+        const enhancedSessions = await Promise.all(
+          sessions.map(async (session) => {
+            const documents = await storage.getDocumentsBySession(session.id, req.userId!);
+            return {
+              ...session,
+              linkedDocuments: documents,
+              documentCount: documents.length
+            };
+          })
+        );
+        res.json(enhancedSessions);
+      } else {
+        res.json(sessions);
+      }
     } catch (error) {
       console.error("Error fetching sessions:", error);
       res.status(500).json({ message: "Failed to fetch sessions" });
@@ -420,8 +731,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/sessions/recent", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const includeDocuments = req.query.includeDocuments === 'true';
       const sessions = await storage.getSessionsByTherapist(req.userId!, limit);
-      res.json(sessions);
+      
+      if (includeDocuments) {
+        // Enhance sessions with linked document counts
+        const enhancedSessions = await Promise.all(
+          sessions.map(async (session) => {
+            const documents = await storage.getDocumentsBySession(session.id, req.userId!);
+            return {
+              ...session,
+              documentCount: documents.length,
+              hasLinkedDocuments: documents.length > 0
+            };
+          })
+        );
+        res.json(enhancedSessions);
+      } else {
+        res.json(sessions);
+      }
     } catch (error) {
       console.error("Error fetching recent sessions:", error);
       res.status(500).json({ message: "Failed to fetch recent sessions" });

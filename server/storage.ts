@@ -25,7 +25,7 @@ import {
   type InsertRateLimitCounter,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, like, or, sql } from "drizzle-orm";
+import { eq, and, desc, like, or, sql, gte, lte, isNull } from "drizzle-orm";
 import { encryptionService, EncryptionAuditLogger } from "./encryption";
 import bcrypt from "bcrypt";
 
@@ -53,6 +53,7 @@ export interface IStorage {
   searchDocuments(query: string, therapistId: string): Promise<Document[]>;
 
   // Session operations
+  getSessionById(id: string, therapistId: string): Promise<Session | undefined>;
   getSessionsByClient(clientId: string, therapistId: string): Promise<Session[]>;
   getSessionsByTherapist(therapistId: string, limit?: number): Promise<Session[]>;
   createSession(session: InsertSession): Promise<Session>;
@@ -114,6 +115,19 @@ export interface IStorage {
   // Rate limiting methods
   getRateLimitCounter(therapistId: string, endpoint: string): Promise<RateLimitCounter | null>;
   updateRateLimitCounter(therapistId: string, endpoint: string, requests: number, resetTime: Date): Promise<void>;
+  
+  // Document-Session Linking methods
+  findSessionsInTimeRange(therapistId: string, startDate: Date, endDate: Date, clientId?: string): Promise<Session[]>;
+  linkDocumentToSession(documentId: string, sessionId: string, therapistId: string, confidence?: number): Promise<Document | undefined>;
+  getDocumentsBySession(sessionId: string, therapistId: string): Promise<Document[]>;
+  updateDocumentAnalysis(documentId: string, analysis: any, tags: any, therapistId: string): Promise<Document | undefined>;
+  findPotentialSessionMatches(documentId: string, therapistId: string, timeWindowHours?: number): Promise<Array<{
+    session: Session;
+    confidence: number;
+    matchReason: string;
+  }>>;
+  unlinkDocumentFromSession(documentId: string, therapistId: string): Promise<Document | undefined>;
+  getUnlinkedDocuments(therapistId: string, limit?: number): Promise<Document[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -255,6 +269,15 @@ export class DatabaseStorage implements IStorage {
   async createSession(session: InsertSession): Promise<Session> {
     const [newSession] = await db.insert(sessions).values(session).returning();
     return newSession;
+  }
+
+  async getSessionById(id: string, therapistId: string): Promise<Session | undefined> {
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, id), eq(sessions.therapistId, therapistId)))
+      .limit(1);
+    return session;
   }
 
   async updateSession(id: string, session: Partial<Session>, therapistId: string): Promise<Session | undefined> {
@@ -618,6 +641,223 @@ export class DatabaseStorage implements IStorage {
         requests,
         resetTime,
       });
+    }
+  }
+
+  // Document-Session Linking method implementations
+  async findSessionsInTimeRange(therapistId: string, startDate: Date, endDate: Date, clientId?: string): Promise<Session[]> {
+    try {
+      const query = db
+        .select()
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.therapistId, therapistId),
+            gte(sessions.sessionDate, startDate),
+            lte(sessions.sessionDate, endDate),
+            ...(clientId ? [eq(sessions.clientId, clientId)] : [])
+          )
+        )
+        .orderBy(sessions.sessionDate);
+
+      return await query;
+    } catch (error) {
+      console.error('[Storage] Error finding sessions in time range:', error);
+      throw new Error('Failed to find sessions in time range');
+    }
+  }
+
+  async linkDocumentToSession(documentId: string, sessionId: string, therapistId: string, confidence?: number): Promise<Document | undefined> {
+    try {
+      // Verify the session belongs to the therapist
+      const session = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.therapistId, therapistId)))
+        .limit(1);
+
+      if (session.length === 0) {
+        throw new Error('Session not found or does not belong to therapist');
+      }
+
+      // Update the document with the session link
+      const [updatedDocument] = await db
+        .update(documents)
+        .set({
+          sessionId,
+          analysis: confidence !== undefined 
+            ? sql`COALESCE(analysis, '{}') || ${JSON.stringify({ linkingConfidence: confidence, linkedAt: new Date().toISOString() })}`
+            : sql`COALESCE(analysis, '{}') || ${JSON.stringify({ linkedAt: new Date().toISOString() })}`,
+          updatedAt: new Date()
+        })
+        .where(and(eq(documents.id, documentId), eq(documents.therapistId, therapistId)))
+        .returning();
+
+      console.log(`[Storage] Document ${documentId} linked to session ${sessionId} with confidence ${confidence || 'N/A'}`);
+      return updatedDocument;
+    } catch (error) {
+      console.error('[Storage] Error linking document to session:', error);
+      throw new Error('Failed to link document to session');
+    }
+  }
+
+  async getDocumentsBySession(sessionId: string, therapistId: string): Promise<Document[]> {
+    try {
+      return await db
+        .select()
+        .from(documents)
+        .where(and(eq(documents.sessionId, sessionId), eq(documents.therapistId, therapistId)))
+        .orderBy(desc(documents.uploadDate));
+    } catch (error) {
+      console.error('[Storage] Error getting documents by session:', error);
+      throw new Error('Failed to get documents by session');
+    }
+  }
+
+  async updateDocumentAnalysis(documentId: string, analysisResults: any, tags: { category?: string; tags?: string[]; keyInsights?: string[] }, therapistId: string): Promise<Document | undefined> {
+    try {
+      const [updatedDocument] = await db
+        .update(documents)
+        .set({
+          analysis: analysisResults,
+          tags: tags,
+          isProcessed: true,
+          updatedAt: new Date()
+        })
+        .where(and(eq(documents.id, documentId), eq(documents.therapistId, therapistId)))
+        .returning();
+
+      return updatedDocument;
+    } catch (error) {
+      console.error('[Storage] Error updating document analysis:', error);
+      throw new Error('Failed to update document analysis');
+    }
+  }
+
+  async findPotentialSessionMatches(documentId: string, therapistId: string, timeWindowHours: number = 48): Promise<Array<{
+    session: Session;
+    confidence: number;
+    matchReason: string;
+  }>> {
+    try {
+      // Get the document first
+      const document = await this.getDocumentById(documentId, therapistId);
+      if (!document) {
+        throw new Error('Document not found');
+      }
+
+      // Calculate time window around document upload
+      const uploadDate = document.uploadDate || document.createdAt;
+      const windowMs = timeWindowHours * 60 * 60 * 1000;
+      const startRange = new Date(uploadDate.getTime() - windowMs);
+      const endRange = new Date(uploadDate.getTime() + windowMs);
+
+      // Find sessions in the time window
+      const sessionsInRange = await this.findSessionsInTimeRange(
+        therapistId,
+        startRange,
+        endRange,
+        document.clientId || undefined
+      );
+
+      // Score each session for potential matches
+      const matches = sessionsInRange.map(session => {
+        let confidence = 0;
+        const reasons: string[] = [];
+
+        // Higher confidence if same client
+        if (document.clientId && session.clientId === document.clientId) {
+          confidence += 0.4;
+          reasons.push('Same client');
+        }
+
+        // Time proximity scoring (closer = higher confidence)
+        const timeDiff = Math.abs(session.sessionDate.getTime() - uploadDate.getTime());
+        const maxTimeDiff = windowMs;
+        const timeScore = Math.max(0, (maxTimeDiff - timeDiff) / maxTimeDiff) * 0.3;
+        confidence += timeScore;
+        reasons.push(`Time proximity: ${Math.round(timeScore * 100)}%`);
+
+        // Content-based scoring (if document content available)
+        if (document.content && session.notes) {
+          // Simple keyword matching - could be enhanced with AI analysis
+          const sessionKeywords = session.notes.toLowerCase();
+          const docKeywords = document.content.toLowerCase();
+          
+          // Check for common therapy-related terms
+          const commonTerms = ['session', 'therapy', 'treatment', 'progress', 'goal', 'intervention'];
+          let keywordMatches = 0;
+          
+          commonTerms.forEach(term => {
+            if (sessionKeywords.includes(term) && docKeywords.includes(term)) {
+              keywordMatches++;
+            }
+          });
+          
+          if (keywordMatches > 0) {
+            const contentScore = Math.min(keywordMatches / commonTerms.length, 1) * 0.2;
+            confidence += contentScore;
+            reasons.push(`Content keywords: ${keywordMatches}/${commonTerms.length}`);
+          }
+        }
+
+        // Bonus for documents uploaded on same day as session
+        const sessionDate = new Date(session.sessionDate).toDateString();
+        const uploadDateStr = new Date(uploadDate).toDateString();
+        if (sessionDate === uploadDateStr) {
+          confidence += 0.1;
+          reasons.push('Same day upload');
+        }
+
+        return {
+          session,
+          confidence: Math.min(confidence, 1), // Cap at 1.0
+          matchReason: reasons.join(', ')
+        };
+      });
+
+      // Return matches sorted by confidence (highest first)
+      return matches
+        .filter(match => match.confidence > 0.1) // Only return reasonable matches
+        .sort((a, b) => b.confidence - a.confidence);
+
+    } catch (error) {
+      console.error('[Storage] Error finding potential session matches:', error);
+      throw new Error('Failed to find potential session matches');
+    }
+  }
+
+  async unlinkDocumentFromSession(documentId: string, therapistId: string): Promise<Document | undefined> {
+    try {
+      const [updatedDocument] = await db
+        .update(documents)
+        .set({
+          sessionId: null,
+          analysis: sql`COALESCE(analysis, '{}') || ${JSON.stringify({ unlinkedAt: new Date().toISOString() })}`,
+          updatedAt: new Date()
+        })
+        .where(and(eq(documents.id, documentId), eq(documents.therapistId, therapistId)))
+        .returning();
+
+      console.log(`[Storage] Document ${documentId} unlinked from session`);
+      return updatedDocument;
+    } catch (error) {
+      console.error('[Storage] Error unlinking document from session:', error);
+      throw new Error('Failed to unlink document from session');
+    }
+  }
+
+  async getUnlinkedDocuments(therapistId: string, limit: number = 50): Promise<Document[]> {
+    try {
+      return await db
+        .select()
+        .from(documents)
+        .where(and(eq(documents.therapistId, therapistId), isNull(documents.sessionId)))
+        .orderBy(desc(documents.uploadDate))
+        .limit(limit);
+    } catch (error) {
+      console.error('[Storage] Error getting unlinked documents:', error);
+      throw new Error('Failed to get unlinked documents');
     }
   }
 }
