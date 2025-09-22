@@ -10,7 +10,7 @@ import { ClientProfile } from "@/components/ClientProfile";
 import { CaseConceptualization } from "@/components/CaseConceptualization";
 import { ClientAITags } from "@/components/ClientAITags";
 import { CalendarSync } from "@/components/CalendarSync";
-import { Calendar, Brain, FileText, TrendingUp, Shield, Link2, User } from "lucide-react";
+import { Calendar, Brain, FileText, TrendingUp, Shield, Link2, User, Clock } from "lucide-react";
 import { 
   useClient, 
   useClientSessions, 

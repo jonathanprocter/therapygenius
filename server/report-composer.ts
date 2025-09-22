@@ -418,14 +418,17 @@ Use appropriate clinical terminology and maintain professional tone throughout. 
 `;
 
     try {
-      const result = await aiRouter.chatJSON(narrativePrompt, z.object({
-        clinicalPresentation: z.string(),
-        treatmentResponse: z.string(),
-        functionalAssessment: z.string(),
-        mentalStatusExam: z.string(),
-        treatmentCompliance: z.string(),
-        prognosticFactors: z.string()
-      }));
+      const result = await aiRouter.chatJSON(
+        [{ role: "user", content: narrativePrompt }],
+        z.object({
+          clinicalPresentation: z.string(),
+          treatmentResponse: z.string(),
+          functionalAssessment: z.string(),
+          mentalStatusExam: z.string(),
+          treatmentCompliance: z.string(),
+          prognosticFactors: z.string()
+        })
+      );
 
       return result;
     } catch (error) {

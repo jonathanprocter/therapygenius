@@ -227,7 +227,7 @@ Be conservative with confidence scores - only high confidence (>0.8) for clear, 
 `;
 
     try {
-      const result = await aiRouter.chatJSON(assessmentPrompt, assessmentExtractionSchema);
+      const result = await aiRouter.chatJSON([{ role: "user", content: assessmentPrompt }], assessmentExtractionSchema);
       return result;
     } catch (error) {
       console.error("[Assessment Extractor] AI parsing failed:", error);

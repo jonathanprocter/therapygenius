@@ -418,15 +418,18 @@ Provide response in JSON format:
 Be conservative and only extract information that is clearly stated. Use clinical terminology when appropriate.
 `;
 
-      const result = await aiRouter.chatJSON(clinicalAnalysisPrompt, z.object({
-        primaryConcerns: z.array(z.string()),
-        secondaryConcerns: z.array(z.string()),
-        strengths: z.array(z.string()),
-        riskFactors: z.array(z.string()),
-        protectiveFactors: z.array(z.string()),
-        diagnosisHistory: z.array(z.string()),
-        medicationHistory: z.array(z.string())
-      }));
+      const result = await aiRouter.chatJSON(
+        [{ role: "user", content: clinicalAnalysisPrompt }],
+        z.object({
+          primaryConcerns: z.array(z.string()),
+          secondaryConcerns: z.array(z.string()),
+          strengths: z.array(z.string()),
+          riskFactors: z.array(z.string()),
+          protectiveFactors: z.array(z.string()),
+          diagnosisHistory: z.array(z.string()),
+          medicationHistory: z.array(z.string())
+        })
+      );
 
       return result;
 
@@ -892,13 +895,16 @@ Focus on evidence-based interventions and be specific in recommendations.
 `;
 
     try {
-      const result = await aiRouter.chatJSON(recommendationsPrompt, z.object({
-        immediate: z.array(z.string()),
-        shortTerm: z.array(z.string()),
-        longTerm: z.array(z.string()),
-        referrals: z.array(z.string()),
-        monitoring: z.array(z.string())
-      }));
+      const result = await aiRouter.chatJSON(
+        [{ role: "user", content: recommendationsPrompt }],
+        z.object({
+          immediate: z.array(z.string()),
+          shortTerm: z.array(z.string()),
+          longTerm: z.array(z.string()),
+          referrals: z.array(z.string()),
+          monitoring: z.array(z.string())
+        })
+      );
 
       return result;
     } catch (error) {

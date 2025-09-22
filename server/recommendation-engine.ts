@@ -360,7 +360,10 @@ Base all recommendations on evidence-based practices and current clinical guidel
 `;
 
     try {
-      const recommendations = await aiRouter.chatJSON(recommendationPrompt, treatmentRecommendationSchema);
+      const recommendations = await aiRouter.chatJSON(
+        [{ role: "user", content: recommendationPrompt }],
+        treatmentRecommendationSchema
+      );
       return recommendations;
     } catch (error) {
       console.error("[Recommendation Engine] AI recommendation generation failed:", error);
