@@ -6,7 +6,7 @@ import { encryptionService, EncryptionAuditLogger } from './encryption';
 import { z } from 'zod';
 
 // Import therapist ID constant for audit logging
-const THERAPIST_ID = "a5e0e292-bb99-4cbe-80c1-fac620ecb8bc";
+const THERAPIST_ID = "59ea3867-0b4f-47b6-8a95-6484c4a52ef7";
 
 interface CalendarEvent {
   id: string;
