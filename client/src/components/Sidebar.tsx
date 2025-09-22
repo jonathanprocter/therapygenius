@@ -1,7 +1,5 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 
 const navigationItems = [
   { path: "/", icon: "fas fa-chart-line", label: "Dashboard" },
@@ -19,17 +17,8 @@ const aiToolsItems = [
   { path: "/calendar/settings", icon: "fas fa-sync-alt", label: "Calendar Sync" },
 ];
 
-interface SidebarProps {
-  user?: {
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-  };
-}
-
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar() {
   const [location, setLocation] = useLocation();
-  const { toast } = useToast();
 
   const isActive = (path: string) => {
     if (path === "/") {
@@ -55,19 +44,18 @@ export function Sidebar({ user }: SidebarProps) {
         <ul className="space-y-2">
           {navigationItems.map((item) => (
             <li key={item.path}>
-              <Link href={item.path}>
-                <a
-                  className={cn(
-                    "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                    isActive(item.path)
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                  data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                >
-                  <i className={cn(item.icon, "w-4")}></i>
-                  <span>{item.label}</span>
-                </a>
+              <Link
+                href={item.path}
+                className={cn(
+                  "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  isActive(item.path)
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+              >
+                <i className={cn(item.icon, "w-4")}></i>
+                <span>{item.label}</span>
               </Link>
             </li>
           ))}
@@ -79,19 +67,18 @@ export function Sidebar({ user }: SidebarProps) {
           <ul className="space-y-2">
             {aiToolsItems.map((item) => (
               <li key={item.path}>
-                <Link href={item.path}>
-                  <a
-                    className={cn(
-                      "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                      isActive(item.path)
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    )}
-                    data-testid={`ai-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                  >
-                    <i className={cn(item.icon, "w-4")}></i>
-                    <span>{item.label}</span>
-                  </a>
+                <Link
+                  href={item.path}
+                  className={cn(
+                    "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                    isActive(item.path)
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  data-testid={`ai-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                >
+                  <i className={cn(item.icon, "w-4")}></i>
+                  <span>{item.label}</span>
                 </Link>
               </li>
             ))}
@@ -107,10 +94,7 @@ export function Sidebar({ user }: SidebarProps) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate" data-testid="user-name">
-              {user?.firstName && user?.lastName 
-                ? `${user.firstName} ${user.lastName}`
-                : user?.email || "User"
-              }
+              Dr. Smith
             </p>
             <p className="text-xs text-muted-foreground truncate">Licensed Therapist</p>
           </div>

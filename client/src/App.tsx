@@ -1,13 +1,9 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Sidebar } from "@/components/Sidebar";
-import { useAuth } from "@/hooks/useAuth";
-import { isUnauthorizedError } from "@/lib/authUtils";
-import { useToast } from "@/hooks/use-toast";
-import { useEffect } from "react";
 
 // Pages
 import Dashboard from "@/pages/dashboard";
@@ -16,17 +12,16 @@ import SessionDetail from "@/pages/session-detail";
 import Documents from "@/pages/documents";
 import Clients from "@/pages/clients";
 import CalendarSettings from "@/pages/calendar-settings";
-import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
-function AppHeader({ user }: { user?: any }) {
+function AppHeader() {
   return (
     <header className="bg-card border-b border-border px-6 py-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" data-testid="page-title">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            Welcome back, {user?.firstName ? `Dr. ${user.firstName}` : user?.username || "User"}
+            Welcome back, Dr. Smith
           </p>
         </div>
         <div className="flex items-center space-x-4">
@@ -57,12 +52,12 @@ function AppHeader({ user }: { user?: any }) {
   );
 }
 
-function AuthenticatedApp({ user }: { user: any }) {
+function MainApp() {
   return (
-    <div className="min-h-screen flex" data-testid="authenticated-app">
-      <Sidebar user={user} />
+    <div className="min-h-screen flex" data-testid="main-app">
+      <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <AppHeader user={user} />
+        <AppHeader />
         <main className="flex-1 overflow-y-auto p-6">
           <Switch>
             <Route path="/" component={Dashboard} />
@@ -86,76 +81,7 @@ function AuthenticatedApp({ user }: { user: any }) {
 }
 
 function Router() {
-  const { user, isLoading, isAuthenticated } = useAuth();
-  const { toast } = useToast();
-  const [, setLocation] = useLocation();
-
-  useEffect(() => {
-    let isHandlingUnauthorized = false;
-
-    // Handle unauthorized errors globally
-    const handleUnauthorized = () => {
-      // Prevent infinite loops by checking if we're already handling unauthorized
-      if (isHandlingUnauthorized) return;
-      isHandlingUnauthorized = true;
-      
-      // Clear auth token cookie
-      document.cookie = "token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-      
-      // Show toast notification (only once)
-      toast({
-        title: "Session Expired",
-        description: "Please log in again to continue.",
-        variant: "destructive",
-      });
-      
-      // Clear cache and redirect
-      queryClient.removeQueries({ queryKey: ["/api/auth/me"] });
-      queryClient.setQueryData(["/api/auth/me"], null);
-      
-      // Redirect to login page
-      setLocation("/login");
-      
-      // Reset flag after a short delay to allow for redirect
-      setTimeout(() => {
-        isHandlingUnauthorized = false;
-      }, 1000);
-    };
-
-    // Listen for unauthorized errors from React Query
-    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-      if (event?.query?.state.error && 
-          isUnauthorizedError(event.query.state.error as Error) && 
-          !isHandlingUnauthorized) {
-        handleUnauthorized();
-      }
-    });
-
-    return unsubscribe;
-  }, [toast, setLocation]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" data-testid="loading-screen">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <i className="fas fa-brain text-primary-foreground text-2xl"></i>
-          </div>
-          <div className="text-lg font-medium mb-2">TherapyFlow</div>
-          <div className="flex items-center justify-center space-x-2 text-muted-foreground">
-            <i className="fas fa-spinner fa-spin"></i>
-            <span>Loading...</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Login />;
-  }
-
-  return <AuthenticatedApp user={user} />;
+  return <MainApp />;
 }
 
 function App() {

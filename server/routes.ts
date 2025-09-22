@@ -1,193 +1,24 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { requireAuth, generateToken, type AuthenticatedRequest } from "./auth";
 import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir, processDocumentWithAutoLinking, DocumentUploadContext } from "./document-processor";
 import { analyzeDocument, generateCaseConceptualization, analyzeDocumentForSessionMatching, extractCalendarContext, generateAutoLinkingMetadata } from "./documentTagger";
 import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } from "./document-fix";
 import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema } from "@shared/schema";
 import { z } from "zod";
-import cookieParser from "cookie-parser";
-import { randomBytes } from "crypto";
+
+// Hardcoded therapist ID for single-therapist practice (no authentication)
+const THERAPIST_ID = "550e8400-e29b-41d4-a716-446655440000";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.use(cookieParser());
-  
-  // Modern CSRF Protection using double-submit cookies
-  const generateCSRFToken = () => randomBytes(32).toString('hex');
-  
-  // CSRF token endpoint
-  app.get("/api/csrf-token", (req, res) => {
-    const token = generateCSRFToken();
-    res.cookie('csrf-token', token, {
-      httpOnly: false, // Needs to be readable by frontend
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 60 * 60 * 1000 // 1 hour
-    });
-    res.json({ csrfToken: token });
-  });
-  
-  // CSRF validation middleware
-  const validateCSRF = (req: any, res: any, next: any) => {
-    const tokenFromHeader = req.headers['x-csrf-token'];
-    const tokenFromCookie = req.cookies['csrf-token'];
-    
-    if (!tokenFromHeader || !tokenFromCookie || tokenFromHeader !== tokenFromCookie) {
-      return res.status(403).json({ message: "CSRF token validation failed" });
-    }
-    next();
-  };
   
   // Ensure upload directory exists
   await ensureUploadDir();
 
-  // Legacy auth routes - DISABLED for security (single-therapist practice uses simple-login)
-  /*
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      const { username, password } = req.body;
-      
-      if (!username || !password) {
-        return res.status(400).json({ message: "Username and password required" });
-      }
-
-      const user = await storage.getUserByUsername(username);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      const isValidPassword = await storage.verifyPassword(password, user.password);
-      if (!isValidPassword) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      const token = generateToken(user.id);
-      
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
-
-      res.json({
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-        },
-        token,
-      });
-    } catch (error) {
-      console.error("Login error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  app.post("/api/auth/register", async (req, res) => {
-    try {
-      const { username, email, password, firstName, lastName } = req.body;
-      
-      if (!username || !email || !password) {
-        return res.status(400).json({ message: "Username, email, and password required" });
-      }
-
-      const existingUser = await storage.getUserByUsername(username);
-      if (existingUser) {
-        return res.status(409).json({ message: "Username already exists" });
-      }
-
-      const user = await storage.createUser({
-        username,
-        email,
-        password,
-        firstName,
-        lastName,
-      });
-
-      const token = generateToken(user.id);
-      
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
-
-      res.status(201).json({
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-        },
-        token,
-      });
-    } catch (error) {
-      console.error("Registration error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-  */
-
-  app.post("/api/auth/logout", validateCSRF, (req, res) => {
-    res.clearCookie("token");
-    res.json({ message: "Logged out successfully" });
-  });
-
-  // Simple password-only login for single-therapist practice - PASSWORD REMOVED FOR DIRECT ACCESS
-  app.post("/api/auth/simple-login", async (req, res) => {
-    try {
-      // PASSWORD AUTHENTICATION REMOVED - Direct access granted
-
-      // Get the first/only therapist user
-      const therapist = await storage.getUserByUsername("jonathan.procter@gmail.com");
-      if (!therapist) {
-        return res.status(500).json({ message: "System error: No therapist account found" });
-      }
-
-      // Generate token using existing auth helper
-      const token = generateToken(therapist.id);
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
-
-      res.json({
-        message: "Access granted",
-        user: {
-          id: therapist.id,
-          username: therapist.username,
-          email: therapist.email,
-          firstName: therapist.firstName,
-          lastName: therapist.lastName,
-        },
-      });
-    } catch (error) {
-      console.error("Simple login error:", error);
-      res.status(500).json({ message: "Login failed" });
-    }
-  });
-
-  app.get("/api/auth/me", requireAuth, async (req: AuthenticatedRequest, res) => {
-    res.json({
-      id: req.user.id,
-      username: req.user.username,
-      email: req.user.email,
-      firstName: req.user.firstName,
-      lastName: req.user.lastName,
-    });
-  });
-
   // Dashboard routes
-  app.get("/api/dashboard/stats", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/dashboard/stats", async (req: Request, res) => {
     try {
-      const stats = await storage.getDashboardStats(req.userId!);
+      const stats = await storage.getDashboardStats(THERAPIST_ID);
       res.json(stats);
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
@@ -196,9 +27,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Client routes
-  app.get("/api/clients", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients", async (req: Request, res) => {
     try {
-      const clients = await storage.getClientsByTherapist(req.userId!);
+      const clients = await storage.getClientsByTherapist(THERAPIST_ID);
       res.json(clients);
     } catch (error) {
       console.error("Error fetching clients:", error);
@@ -206,9 +37,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/clients/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients/:id", async (req: Request, res) => {
     try {
-      const client = await storage.getClientById(req.params.id, req.userId!);
+      const client = await storage.getClientById(req.params.id, THERAPIST_ID);
       if (!client) {
         return res.status(404).json({ message: "Client not found" });
       }
@@ -219,11 +50,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/clients", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/clients", async (req: Request, res) => {
     try {
       const clientData = insertClientSchema.parse({
         ...req.body,
-        therapistId: req.userId,
+        therapistId: THERAPIST_ID,
       });
       
       const client = await storage.createClient(clientData);
@@ -237,9 +68,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/clients/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.put("/api/clients/:id", async (req: Request, res) => {
     try {
-      const client = await storage.updateClient(req.params.id, req.body, req.userId!);
+      const client = await storage.updateClient(req.params.id, req.body, THERAPIST_ID);
       if (!client) {
         return res.status(404).json({ message: "Client not found" });
       }
@@ -250,9 +81,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/clients/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.delete("/api/clients/:id", async (req: Request, res) => {
     try {
-      const deleted = await storage.deleteClient(req.params.id, req.userId!);
+      const deleted = await storage.deleteClient(req.params.id, THERAPIST_ID);
       if (!deleted) {
         return res.status(404).json({ message: "Client not found" });
       }
@@ -264,10 +95,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Document routes
-  app.get("/api/documents", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/documents", async (req: Request, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      const documents = await storage.getDocumentsByTherapist(req.userId!, limit);
+      const documents = await storage.getDocumentsByTherapist(THERAPIST_ID, limit);
       res.json(documents);
     } catch (error) {
       console.error("Error fetching documents:", error);
@@ -275,9 +106,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/documents/client/:clientId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/documents/client/:clientId", async (req: Request, res) => {
     try {
-      const documents = await storage.getDocumentsByClient(req.params.clientId, req.userId!);
+      const documents = await storage.getDocumentsByClient(req.params.clientId, THERAPIST_ID);
       res.json(documents);
     } catch (error) {
       console.error("Error fetching client documents:", error);
@@ -285,14 +116,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/documents/search", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/documents/search", async (req: Request, res) => {
     try {
       const query = req.query.q as string;
       if (!query) {
         return res.status(400).json({ message: "Search query required" });
       }
       
-      const documents = await storage.searchDocuments(query, req.userId!);
+      const documents = await storage.searchDocuments(query, THERAPIST_ID);
       res.json(documents);
     } catch (error) {
       console.error("Error searching documents:", error);
@@ -300,7 +131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/documents/upload", validateCSRF, requireAuth, upload.array("files", 10), async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/upload", upload.array("files", 10), async (req: Request, res) => {
     try {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
@@ -338,7 +169,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Create document record
           const document = await storage.createDocument({
-            therapistId: req.userId!,
+            therapistId: THERAPIST_ID,
             clientId,
             fileName: file.originalname,
             fileType: file.mimetype,
@@ -356,12 +187,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               content: processed.content,
               metadata: processed.metadata,
               isProcessed: true,
-            }, req.userId!);
+            }, THERAPIST_ID);
 
             if (updatedDocument) {
               // Perform intelligent auto-linking and return full result
               const context: DocumentUploadContext = {
-                therapistId: req.userId!,
+                therapistId: THERAPIST_ID,
                 clientId,
                 sessionId,
                 sourceEventId,
@@ -399,7 +230,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Update document with processing error
             await storage.updateDocument(document.id, {
               processingError: processingError instanceof Error ? processingError.message : String(processingError),
-            }, req.userId!);
+            }, THERAPIST_ID);
 
             // Return partial result with error details
             results.push({
@@ -444,9 +275,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/documents/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.delete("/api/documents/:id", async (req: Request, res) => {
     try {
-      const deleted = await storage.deleteDocument(req.params.id, req.userId!);
+      const deleted = await storage.deleteDocument(req.params.id, THERAPIST_ID);
       if (!deleted) {
         return res.status(404).json({ message: "Document not found" });
       }
@@ -460,10 +291,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Enhanced Document-Session Linking Endpoints
 
   // Get potential session matches for a document
-  app.get("/api/documents/:id/potential-matches", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/documents/:id/potential-matches", async (req: Request, res) => {
     try {
       const timeWindowHours = req.query.timeWindowHours ? parseInt(req.query.timeWindowHours as string) : 48;
-      const potentialMatches = await storage.findPotentialSessionMatches(req.params.id, req.userId!, timeWindowHours);
+      const potentialMatches = await storage.findPotentialSessionMatches(req.params.id, THERAPIST_ID, timeWindowHours);
       res.json({ potentialMatches });
     } catch (error) {
       console.error("Error finding potential session matches:", error);
@@ -472,7 +303,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Manually link a document to a session
-  app.post("/api/documents/:id/link-session", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/link-session", async (req: Request, res) => {
     try {
       const { sessionId, confidence } = req.body;
       
@@ -483,7 +314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const linkedDocument = await storage.linkDocumentToSession(
         req.params.id,
         sessionId,
-        req.userId!,
+        THERAPIST_ID,
         confidence
       );
 
@@ -502,9 +333,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Unlink a document from its session
-  app.post("/api/documents/:id/unlink-session", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/unlink-session", async (req: Request, res) => {
     try {
-      const unlinkedDocument = await storage.unlinkDocumentFromSession(req.params.id, req.userId!);
+      const unlinkedDocument = await storage.unlinkDocumentFromSession(req.params.id, THERAPIST_ID);
 
       if (!unlinkedDocument) {
         return res.status(404).json({ message: "Document not found" });
@@ -521,9 +352,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get documents by session
-  app.get("/api/sessions/:sessionId/documents", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/sessions/:sessionId/documents", async (req: Request, res) => {
     try {
-      const documents = await storage.getDocumentsBySession(req.params.sessionId, req.userId!);
+      const documents = await storage.getDocumentsBySession(req.params.sessionId, THERAPIST_ID);
       res.json(documents);
     } catch (error) {
       console.error("Error fetching session documents:", error);
@@ -532,10 +363,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get unlinked documents (for manual linking interface)
-  app.get("/api/documents/unlinked", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/documents/unlinked", async (req: Request, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      const unlinkedDocuments = await storage.getUnlinkedDocuments(req.userId!, limit);
+      const unlinkedDocuments = await storage.getUnlinkedDocuments(THERAPIST_ID, limit);
       res.json(unlinkedDocuments);
     } catch (error) {
       console.error("Error fetching unlinked documents:", error);
@@ -544,7 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Enhanced AI analysis for document-session matching
-  app.post("/api/documents/:id/analyze-session-matches", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/analyze-session-matches", async (req: Request, res) => {
     try {
       const { potentialSessionIds } = req.body;
       
@@ -552,7 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Array of potential session IDs is required" });
       }
 
-      const document = await storage.getDocumentById(req.params.id, req.userId!);
+      const document = await storage.getDocumentById(req.params.id, THERAPIST_ID);
       if (!document) {
         return res.status(404).json({ message: "Document not found" });
       }
@@ -560,7 +391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get session details for analysis
       const potentialSessions = [];
       for (const sessionId of potentialSessionIds) {
-        const sessionData = await storage.getSessionsByClient('', req.userId!); // Will be filtered by session ID logic
+        const sessionData = await storage.getSessionsByClient('', THERAPIST_ID); // Will be filtered by session ID logic
         const session = sessionData.find(s => s.id === sessionId);
         if (session) {
           potentialSessions.push({
@@ -575,7 +406,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const analysisResults = await analyzeDocumentForSessionMatching(
         document,
         potentialSessions,
-        req.userId!
+        THERAPIST_ID
       );
 
       res.json({ analysisResults });
@@ -586,14 +417,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Extract calendar context from document
-  app.post("/api/documents/:id/extract-calendar-context", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/extract-calendar-context", async (req: Request, res) => {
     try {
-      const document = await storage.getDocumentById(req.params.id, req.userId!);
+      const document = await storage.getDocumentById(req.params.id, THERAPIST_ID);
       if (!document) {
         return res.status(404).json({ message: "Document not found" });
       }
 
-      const calendarContext = await extractCalendarContext(document, req.userId!);
+      const calendarContext = await extractCalendarContext(document, THERAPIST_ID);
       res.json({ calendarContext });
     } catch (error) {
       console.error("Error extracting calendar context:", error);
@@ -602,9 +433,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Generate auto-linking metadata and recommendations
-  app.get("/api/documents/:id/auto-linking-metadata", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/documents/:id/auto-linking-metadata", async (req: Request, res) => {
     try {
-      const document = await storage.getDocumentById(req.params.id, req.userId!);
+      const document = await storage.getDocumentById(req.params.id, THERAPIST_ID);
       if (!document) {
         return res.status(404).json({ message: "Document not found" });
       }
@@ -616,7 +447,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const autoLinkingMetadata = await generateAutoLinkingMetadata(
         document,
         document.analysis as any,
-        req.userId!
+        THERAPIST_ID
       );
 
       res.json({ autoLinkingMetadata });
@@ -627,7 +458,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bulk re-analyze documents for auto-linking
-  app.post("/api/documents/bulk-reanalyze", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/bulk-reanalyze", async (req: Request, res) => {
     try {
       const { documentIds, includeLinked } = req.body;
       
@@ -639,7 +470,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       for (const documentId of documentIds) {
         try {
-          const document = await storage.getDocumentById(documentId, req.userId!);
+          const document = await storage.getDocumentById(documentId, THERAPIST_ID);
           if (!document) {
             results.push({ documentId, status: 'not_found' });
             continue;
@@ -653,7 +484,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Re-analyze with auto-linking
           const context: DocumentUploadContext = {
-            therapistId: req.userId!,
+            therapistId: THERAPIST_ID,
             clientId: document.clientId || undefined
           };
 
@@ -681,16 +512,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Session routes
-  app.get("/api/sessions/client/:clientId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/sessions/client/:clientId", async (req: Request, res) => {
     try {
       const includeDocuments = req.query.includeDocuments === 'true';
-      const sessions = await storage.getSessionsByClient(req.params.clientId, req.userId!);
+      const sessions = await storage.getSessionsByClient(req.params.clientId, THERAPIST_ID);
       
       if (includeDocuments) {
         // Enhance sessions with linked document information
         const enhancedSessions = await Promise.all(
           sessions.map(async (session) => {
-            const documents = await storage.getDocumentsBySession(session.id, req.userId!);
+            const documents = await storage.getDocumentsBySession(session.id, THERAPIST_ID);
             return {
               ...session,
               linkedDocuments: documents,
@@ -709,20 +540,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GET /api/sessions/:id - Get session details with AI tags
-  app.get("/api/sessions/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/sessions/:id", async (req: Request, res) => {
     try {
       const { id } = req.params;
-      const session = await storage.getSessionById(id, req.userId!);
+      const session = await storage.getSessionById(id, THERAPIST_ID);
       
       if (!session) {
         return res.status(404).json({ message: "Session not found" });
       }
       
       // Get AI tags for this session
-      const aiTags = await storage.getSessionAITags(session.id, req.userId!);
+      const aiTags = await storage.getSessionAITags(session.id, THERAPIST_ID);
       
       // Get linked documents
-      const linkedDocuments = await storage.getDocumentsBySession(session.id, req.userId!);
+      const linkedDocuments = await storage.getDocumentsBySession(session.id, THERAPIST_ID);
       
       // Return enhanced session with AI tags and document info
       const enhancedSession = {
@@ -747,17 +578,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sessions/recent", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/sessions/recent", async (req: Request, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const includeDocuments = req.query.includeDocuments === 'true';
-      const sessions = await storage.getSessionsByTherapist(req.userId!, limit);
+      const sessions = await storage.getSessionsByTherapist(THERAPIST_ID, limit);
       
       if (includeDocuments) {
         // Enhance sessions with linked document counts
         const enhancedSessions = await Promise.all(
           sessions.map(async (session) => {
-            const documents = await storage.getDocumentsBySession(session.id, req.userId!);
+            const documents = await storage.getDocumentsBySession(session.id, THERAPIST_ID);
             return {
               ...session,
               documentCount: documents.length,
@@ -775,11 +606,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/sessions", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/sessions", async (req: Request, res) => {
     try {
       const sessionData = insertSessionSchema.parse({
         ...req.body,
-        therapistId: req.userId,
+        therapistId: THERAPIST_ID,
       });
       
       const session = await storage.createSession(sessionData);
@@ -791,12 +622,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           setImmediate(async () => {
             try {
               const { sessionTagger } = await import('./sessionTagger');
-              const sessionTags = await sessionTagger.generateSessionTags(session.id, req.userId!);
-              await storage.updateSessionAITags(session.id, sessionTags, req.userId!);
+              const sessionTags = await sessionTagger.generateSessionTags(session.id, THERAPIST_ID);
+              await storage.updateSessionAITags(session.id, sessionTags, THERAPIST_ID);
               
               // Update client tags based on new session
               const { clientTagger } = await import('./clientTagger');
-              await clientTagger.updateClientTagsForNewSession(session.clientId, req.userId!, session.id);
+              await clientTagger.updateClientTagsForNewSession(session.clientId, THERAPIST_ID, session.id);
               
               console.log(`[AutoTrigger] AI tags generated for new session ${session.id}`);
             } catch (aiError) {
@@ -819,12 +650,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Session update endpoint with automatic AI tagging triggers
-  app.put("/api/sessions/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.put("/api/sessions/:id", async (req: Request, res) => {
     try {
       const { id } = req.params;
       const sessionData = insertSessionSchema.partial().parse(req.body);
       
-      const updatedSession = await storage.updateSession(id, sessionData, req.userId!);
+      const updatedSession = await storage.updateSession(id, sessionData, THERAPIST_ID);
       
       if (!updatedSession) {
         return res.status(404).json({ message: "Session not found" });
@@ -837,22 +668,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           setImmediate(async () => {
             try {
               const { sessionTagger } = await import('./sessionTagger');
-              const sessionTags = await sessionTagger.regenerateSessionTags(updatedSession.id, req.userId!);
+              const sessionTags = await sessionTagger.regenerateSessionTags(updatedSession.id, THERAPIST_ID);
               
               // CRITICAL FIX: Explicit persistence call to ensure tags are saved to database
-              await storage.updateSessionAITags(updatedSession.id, sessionTags, req.userId!);
+              await storage.updateSessionAITags(updatedSession.id, sessionTags, THERAPIST_ID);
               console.log(`[AutoTrigger] [PERSISTENCE] Session AI tags explicitly persisted for session ${updatedSession.id}`);
               
               // Update client tags based on session changes
               const { clientTagger } = await import('./clientTagger');
-              await clientTagger.updateClientTagsForNewSession(updatedSession.clientId, req.userId!, updatedSession.id);
+              await clientTagger.updateClientTagsForNewSession(updatedSession.clientId, THERAPIST_ID, updatedSession.id);
               
               console.log(`[AutoTrigger] AI tags regenerated and persisted for updated session ${updatedSession.id}`);
             } catch (aiError) {
               console.error(`[AutoTrigger] [CRITICAL] Failed to regenerate and persist AI tags for session ${updatedSession.id}:`, aiError);
               
               // Additional error context for debugging
-              console.error(`[AutoTrigger] [CRITICAL] Session ID: ${updatedSession.id}, User ID: ${req.userId}, Error details:`, {
+              console.error(`[AutoTrigger] [CRITICAL] Session ID: ${updatedSession.id}, User ID: ${THERAPIST_ID}, Error details:`, {
                 message: aiError instanceof Error ? aiError.message : String(aiError),
                 stack: aiError instanceof Error ? aiError.stack : undefined,
                 timestamp: new Date().toISOString()
@@ -875,7 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Calendar integration routes
-  app.get("/api/calendar/auth", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/calendar/auth", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
       const authUrl = calendarModule.calendarSync.getAuthUrl();
@@ -886,7 +717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/calendar/callback", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/calendar/callback", async (req: Request, res) => {
     try {
       const { code } = req.query;
       
@@ -895,7 +726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const calendarModule = await import("./calendar-sync");
-      await calendarModule.calendarSync.exchangeCodeForTokens(code, req.userId!);
+      await calendarModule.calendarSync.exchangeCodeForTokens(code, THERAPIST_ID);
       
       res.json({ 
         message: "Google Calendar successfully connected",
@@ -910,10 +741,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/calendar/sync", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/calendar/sync", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
-      const syncStatus = await calendarModule.calendarSync.syncCalendar(req.userId!);
+      const syncStatus = await calendarModule.calendarSync.syncCalendar(THERAPIST_ID);
       res.json(syncStatus);
     } catch (error) {
       console.error("Error syncing calendar:", error);
@@ -924,10 +755,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/calendar/status", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/calendar/status", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
-      const status = await calendarModule.calendarSync.getSyncStatus(req.userId!);
+      const status = await calendarModule.calendarSync.getSyncStatus(THERAPIST_ID);
       res.json(status);
     } catch (error) {
       console.error("Error getting calendar status:", error);
@@ -939,10 +770,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GET /api/calendar/stats - Calendar sync statistics for dashboard
-  app.get("/api/calendar/stats", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/calendar/stats", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
-      const stats = await calendarModule.calendarSync.getSyncStatus(req.userId!);
+      const stats = await calendarModule.calendarSync.getSyncStatus(THERAPIST_ID);
       
       // Transform status into stats format expected by UI
       const calendarStats = {
@@ -971,10 +802,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/calendar/disconnect", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.delete("/api/calendar/disconnect", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
-      await calendarModule.calendarSync.revokeAccess(req.userId!);
+      await calendarModule.calendarSync.revokeAccess(THERAPIST_ID);
       res.json({ message: "Google Calendar disconnected successfully" });
     } catch (error) {
       console.error("Error disconnecting calendar:", error);
@@ -986,9 +817,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Assessment routes
-  app.get("/api/assessments/client/:clientId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/assessments/client/:clientId", async (req: Request, res) => {
     try {
-      const assessments = await storage.getAssessmentsByClient(req.params.clientId, req.userId!);
+      const assessments = await storage.getAssessmentsByClient(req.params.clientId, THERAPIST_ID);
       res.json(assessments);
     } catch (error) {
       console.error("Error fetching assessments:", error);
@@ -996,11 +827,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/assessments", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/assessments", async (req: Request, res) => {
     try {
       const assessmentData = insertAssessmentSchema.parse({
         ...req.body,
-        therapistId: req.userId,
+        therapistId: THERAPIST_ID,
       });
       
       const assessment = await storage.createAssessment(assessmentData);
@@ -1015,9 +846,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Treatment Plan routes
-  app.get("/api/treatment-plans/client/:clientId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/treatment-plans/client/:clientId", async (req: Request, res) => {
     try {
-      const plans = await storage.getTreatmentPlansByClient(req.params.clientId, req.userId!);
+      const plans = await storage.getTreatmentPlansByClient(req.params.clientId, THERAPIST_ID);
       res.json(plans);
     } catch (error) {
       console.error("Error fetching treatment plans:", error);
@@ -1025,11 +856,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/treatment-plans", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/treatment-plans", async (req: Request, res) => {
     try {
       const planData = insertTreatmentPlanSchema.parse({
         ...req.body,
-        therapistId: req.userId,
+        therapistId: THERAPIST_ID,
       });
       
       const plan = await storage.createTreatmentPlan(planData);
@@ -1044,9 +875,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // AI features routes
-  app.post("/api/ai/case-conceptualization/:clientId", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/ai/case-conceptualization/:clientId", async (req: Request, res) => {
     try {
-      const conceptualization = await generateCaseConceptualization(req.params.clientId, req.userId!);
+      const conceptualization = await generateCaseConceptualization(req.params.clientId, THERAPIST_ID);
       res.json(conceptualization);
     } catch (error) {
       console.error("Error generating case conceptualization:", error);
@@ -1055,7 +886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // System maintenance routes
-  app.post("/api/system/repair-documents", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/system/repair-documents", async (req: Request, res) => {
     try {
       const result = await repairDocumentSystem();
       res.json(result);
@@ -1065,7 +896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/system/verify-integrity", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/system/verify-integrity", async (req: Request, res) => {
     try {
       const result = await verifyDocumentIntegrity();
       res.json(result);
@@ -1075,7 +906,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/system/cleanup-files", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/system/cleanup-files", async (req: Request, res) => {
     try {
       const result = await cleanupOrphanedFiles();
       res.json(result);
@@ -1090,10 +921,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==========================================
 
   // Session AI Tagging Endpoints
-  app.post("/api/sessions/:sessionId/ai-tags/generate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/sessions/:sessionId/ai-tags/generate", async (req: Request, res) => {
     try {
       const { sessionId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const tags = await storage.generateSessionAITags(sessionId, therapistId);
       await storage.updateSessionAITags(sessionId, tags, therapistId);
@@ -1114,10 +945,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sessions/:sessionId/ai-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/sessions/:sessionId/ai-tags", async (req: Request, res) => {
     try {
       const { sessionId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const tags = await storage.getSessionAITags(sessionId, therapistId);
       
@@ -1136,11 +967,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/sessions/:sessionId/ai-tags", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.put("/api/sessions/:sessionId/ai-tags", async (req: Request, res) => {
     try {
       const { sessionId } = req.params;
       const { tags } = req.body;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const updatedSession = await storage.updateSessionAITags(sessionId, tags, therapistId);
       
@@ -1166,10 +997,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/sessions/:sessionId/ai-tags/regenerate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/sessions/:sessionId/ai-tags/regenerate", async (req: Request, res) => {
     try {
       const { sessionId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const { sessionTagger } = await import('./sessionTagger');
       const tags = await sessionTagger.regenerateSessionTags(sessionId, therapistId);
@@ -1190,10 +1021,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Client AI Tagging Endpoints
-  app.post("/api/clients/:clientId/ai-tags/generate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/clients/:clientId/ai-tags/generate", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const tags = await storage.generateClientAITags(clientId, therapistId);
       await storage.updateClientAITags(clientId, tags, therapistId);
@@ -1214,10 +1045,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/clients/:clientId/ai-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients/:clientId/ai-tags", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const tags = await storage.getClientAITags(clientId, therapistId);
       
@@ -1236,11 +1067,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/clients/:clientId/ai-tags", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.put("/api/clients/:clientId/ai-tags", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
       const { tags } = req.body;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const updatedClient = await storage.updateClientAITags(clientId, tags, therapistId);
       
@@ -1266,10 +1097,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/clients/:clientId/ai-tags/regenerate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/clients/:clientId/ai-tags/regenerate", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const { clientTagger } = await import('./clientTagger');
       const tags = await clientTagger.regenerateClientTags(clientId, therapistId);
@@ -1290,10 +1121,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bulk AI Tagging Operations
-  app.post("/api/ai-tags/bulk/sessions", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/ai-tags/bulk/sessions", async (req: Request, res) => {
     try {
       const { sessionIds } = req.body;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
         return res.status(400).json({ 
@@ -1324,10 +1155,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/ai-tags/bulk/clients", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/ai-tags/bulk/clients", async (req: Request, res) => {
     try {
       const { clientIds } = req.body;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       if (!Array.isArray(clientIds) || clientIds.length === 0) {
         return res.status(400).json({ 
@@ -1359,10 +1190,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Search and Filtering Endpoints
-  app.get("/api/search/sessions-by-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/search/sessions-by-tags", async (req: Request, res) => {
     try {
       const { tags } = req.query;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       if (!tags) {
         return res.status(400).json({ 
@@ -1389,10 +1220,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/search/clients-by-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/search/clients-by-tags", async (req: Request, res) => {
     try {
       const { tags } = req.query;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       if (!tags) {
         return res.status(400).json({ 
@@ -1420,11 +1251,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // AI Insights and Analytics Endpoints
-  app.get("/api/clients/:clientId/session-trends", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients/:clientId/session-trends", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
       const { startDate, endDate } = req.query;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       let timeRange;
       if (startDate && endDate) {
@@ -1451,10 +1282,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/clients/:clientId/progress-insights", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients/:clientId/progress-insights", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const insights = await storage.getClientProgressInsights(clientId, therapistId);
 
@@ -1472,9 +1303,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/ai-insights/clinical-summary", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/ai-insights/clinical-summary", async (req: Request, res) => {
     try {
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const summary = await storage.getClinicalInsightsSummary(therapistId);
 
@@ -1491,10 +1322,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/clients/:clientId/comprehensive-report", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients/:clientId/comprehensive-report", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const { clientTagger } = await import('./clientTagger');
       const report = await clientTagger.getClientProgressReport(clientId, therapistId);
@@ -1514,10 +1345,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Enhanced Case Conceptualization Endpoint
-  app.post("/api/clients/:clientId/case-conceptualization", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/clients/:clientId/case-conceptualization", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const conceptualization = await generateCaseConceptualization(clientId, therapistId);
 
@@ -1538,10 +1369,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Session Trend Analysis Endpoint
-  app.get("/api/clients/:clientId/session-analysis", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.get("/api/clients/:clientId/session-analysis", async (req: Request, res) => {
     try {
       const { clientId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       const { sessionTagger } = await import('./sessionTagger');
       const analysis = await sessionTagger.analyzeSessionTrends(clientId, therapistId);
@@ -1561,10 +1392,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Automatic Tag Generation Trigger Endpoint (for when sessions are updated)
-  app.post("/api/sessions/:sessionId/trigger-ai-update", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/sessions/:sessionId/trigger-ai-update", async (req: Request, res) => {
     try {
       const { sessionId } = req.params;
-      const therapistId = req.user.id;
+      const therapistId = THERAPIST_ID;
 
       // Get session to find client ID
       const session = await storage.getSessionById(sessionId, therapistId);
