@@ -5,6 +5,9 @@ import { aiRouter } from './ai';
 import { encryptionService, EncryptionAuditLogger } from './encryption';
 import { z } from 'zod';
 
+// Import therapist ID constant for audit logging
+const THERAPIST_ID = "a5e0e292-bb99-4cbe-80c1-fac620ecb8bc";
+
 interface CalendarEvent {
   id: string;
   summary?: string;
@@ -94,9 +97,9 @@ class CalendarSyncService {
     // Only add login hint if email is provided by authenticated therapist
     if (therapistEmail) {
       authConfig.login_hint = therapistEmail;
-      this.logAuditEvent('oauth_url_generated', 'system', true, `Login hint: ${therapistEmail}`);
+      this.logAuditEvent('oauth_url_generated', THERAPIST_ID, true, `Login hint: ${therapistEmail}`);
     } else {
-      this.logAuditEvent('oauth_url_generated', 'system', true, 'No login hint provided');
+      this.logAuditEvent('oauth_url_generated', THERAPIST_ID, true, 'No login hint provided');
     }
     
     return this.oauth2Client.generateAuthUrl(authConfig);
@@ -600,7 +603,7 @@ class CalendarSyncService {
       }
 
       // Use AI for intelligent matching
-      const aiMatch = await this.findAIMatch(eventInfo, clients);
+      const aiMatch = await this.findAIMatch(eventInfo, clients, therapistId);
       if (aiMatch) {
         return aiMatch;
       }
@@ -651,10 +654,10 @@ class CalendarSyncService {
   /**
    * AI-powered intelligent matching (HIPAA COMPLIANT)
    */
-  private async findAIMatch(eventInfo: any, clients: any[]): Promise<ClientMatch | null> {
+  private async findAIMatch(eventInfo: any, clients: any[], therapistId: string): Promise<ClientMatch | null> {
     try {
       // SECURITY: HIPAA Compliance validation before AI call
-      if (!this.validateHIPAACompliance('calendar_event_matching')) {
+      if (!this.validateHIPAACompliance('calendar_event_matching', therapistId)) {
         console.warn('[Calendar Sync] [HIPAA] Skipping AI matching - HIPAA compliance disabled');
         return null;
       }
@@ -703,7 +706,7 @@ If no confident match found, respond with: {"match": false}
 `;
 
       // AUDIT: Log AI call for HIPAA compliance
-      this.logAuditEvent('ai_calendar_matching', 'system', true, 'HIPAA compliant deidentified matching');
+      this.logAuditEvent('ai_calendar_matching', therapistId, true, 'HIPAA compliant deidentified matching');
 
       const result = await aiRouter.chatJSON([
         { role: 'system', content: 'You are a helpful assistant that matches deidentified calendar events to therapy clients with high accuracy. Never include actual names or PHI in responses.' },
@@ -725,7 +728,7 @@ If no confident match found, respond with: {"match": false}
       return null;
     } catch (error) {
       console.error('[Calendar Sync] [HIPAA] Error in AI matching:', error);
-      this.logAuditEvent('ai_calendar_matching_error', 'system', false, error instanceof Error ? error.message : String(error));
+      this.logAuditEvent('ai_calendar_matching_error', therapistId, false, error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -733,11 +736,11 @@ If no confident match found, respond with: {"match": false}
   /**
    * HIPAA compliance validation for AI operations
    */
-  private validateHIPAACompliance(operation: string): boolean {
+  private validateHIPAACompliance(operation: string, therapistId: string): boolean {
     const isHIPAACompliant = process.env.HIPAA_SAFE_AI === 'true';
     if (!isHIPAACompliant) {
       console.warn(`[Calendar Sync] [HIPAA] Operation '${operation}' blocked - HIPAA_SAFE_AI not enabled`);
-      this.logAuditEvent('hipaa_compliance_block', 'system', false, `Operation: ${operation}`);
+      this.logAuditEvent('hipaa_compliance_block', therapistId, false, `Operation: ${operation}`);
     }
     return isHIPAACompliant;
   }

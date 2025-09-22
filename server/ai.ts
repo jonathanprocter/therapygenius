@@ -532,7 +532,12 @@ class AIRouter {
 
     const content = response.content[0];
     if (content.type === "text") {
-      return JSON.parse(content.text);
+      // Clean JSON from markdown code blocks if present
+      let jsonText = content.text.trim();
+      if (jsonText.startsWith('```json') || jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+      return JSON.parse(jsonText);
     }
     throw new Error("Unexpected response format from Anthropic");
   }
