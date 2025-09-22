@@ -321,6 +321,12 @@ export default function ClientChart() {
                                       {session.duration} min
                                     </Badge>
                                   )}
+                                  {session.externalEventId && session.sourceCalendar && (
+                                    <Badge className="bg-green-100 text-green-800 border-green-200" data-testid={`calendar-badge-${session.id}`}>
+                                      <Calendar className="w-3 h-3 mr-1" />
+                                      From Calendar
+                                    </Badge>
+                                  )}
                                 </div>
                                 {session.notes && (
                                   <p className="text-sm text-muted-foreground mb-2">

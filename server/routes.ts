@@ -816,6 +816,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/calendar/reconcile", async (req: Request, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      const result = await calendarModule.calendarSync.reconcileOrphanedSessions(THERAPIST_ID);
+      res.json({
+        success: true,
+        message: "Calendar session reconciliation completed",
+        ...result
+      });
+    } catch (error) {
+      console.error("Error reconciling calendar sessions:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to reconcile calendar sessions",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Assessment routes
   app.get("/api/assessments/client/:clientId", async (req: Request, res) => {
     try {

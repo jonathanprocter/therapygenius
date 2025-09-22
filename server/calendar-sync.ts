@@ -335,6 +335,12 @@ class CalendarSyncService {
             await this.delay(this.SYNC_RATE_LIMIT_MS);
           }
           
+          // THERAPY FILTER: Only process therapy-related events
+          if (!this.isTherapyRelatedEvent(event)) {
+            console.log(`[Calendar Sync] [FILTER] Skipping non-therapy event: ${event.summary}`);
+            continue;
+          }
+          
           // RELIABILITY: Use upsert for session handling
           const clientMatch = await this.matchEventToClient(event, therapistId);
           
@@ -1038,6 +1044,137 @@ If no confident match found, respond with: {"match": false}
     } catch (error) {
       console.error('[Calendar Sync] Failed to export audit logs:', error);
       return [];
+    }
+  }
+
+  /**
+   * THERAPY FILTER: Determine if an event is therapy-related
+   */
+  private isTherapyRelatedEvent(event: CalendarEvent): boolean {
+    const title = (event.summary || '').toLowerCase();
+    const description = (event.description || '').toLowerCase();
+    
+    // Skip clearly non-therapy events
+    const skipPatterns = [
+      'flight', 'commute', 'shower', 'prep', 'walk dogs', 'spanish', 'free time',
+      'tag/respond to e-mails', 'e-mail', 'phone calls', 'text messages',
+      'academic writing', 'grading', 'participation', 'office hours',
+      'meeting with nora', 'focus time', 'deep work', 'edc ', 'gcu ',
+      'ccu ', 'liu ', 'birthday', 'vacation', 'trip', 'hotel', 'stay at'
+    ];
+    
+    // Skip if title contains any skip patterns
+    if (skipPatterns.some(pattern => title.includes(pattern))) {
+      return false;
+    }
+    
+    // Include patterns that suggest therapy sessions
+    const therapyPatterns = [
+      'therapy', 'session', 'appointment', 'client', 'patient',
+      'counseling', 'consultation', 'assessment', 'intake',
+      'follow-up', 'check-in', 'individual', 'group therapy'
+    ];
+    
+    // Include if title or description contains therapy patterns
+    if (therapyPatterns.some(pattern => 
+      title.includes(pattern) || description.includes(pattern)
+    )) {
+      return true;
+    }
+    
+    // Include events with attendees (excluding obvious personal events)
+    if (event.attendees && event.attendees.length > 0) {
+      // But skip if it's a clearly personal event
+      const personalPatterns = ['birthday', 'family', 'personal', 'vacation'];
+      if (!personalPatterns.some(pattern => title.includes(pattern))) {
+        return true;
+      }
+    }
+    
+    // Include events that are 15-120 minutes (typical therapy session duration)
+    const startTime = event.start?.dateTime || event.start?.date;
+    const endTime = event.end?.dateTime || event.end?.date;
+    
+    if (startTime && endTime) {
+      const duration = (new Date(endTime).getTime() - new Date(startTime).getTime()) / (1000 * 60);
+      if (duration >= 15 && duration <= 120) {
+        // If duration suggests therapy session and no obvious skip patterns
+        return !skipPatterns.some(pattern => title.includes(pattern));
+      }
+    }
+    
+    // Default to false for unknown events
+    return false;
+  }
+
+  /**
+   * RECONCILIATION: Reassign orphaned calendar sessions to correct clients
+   */
+  async reconcileOrphanedSessions(therapistId: string): Promise<{
+    processed: number;
+    reassigned: number;
+    errors: string[];
+  }> {
+    console.log('[Calendar Sync] [RECONCILIATION] Starting orphaned session reconciliation...');
+    
+    let processed = 0;
+    let reassigned = 0;
+    const errors: string[] = [];
+    
+    try {
+      // Get all calendar sessions (those with externalEventId)
+      const allSessions = await storage.getSessionsByTherapist(therapistId, 1000);
+      const calendarSessions = allSessions.filter(session => session.externalEventId);
+      
+      console.log(`[Calendar Sync] [RECONCILIATION] Found ${calendarSessions.length} calendar sessions to process`);
+      
+      // Get all clients for matching
+      const clients = await storage.getClientsByTherapist(therapistId);
+      
+      for (const session of calendarSessions) {
+        try {
+          processed++;
+          
+          // Extract event info from session notes and AI tags
+          const eventTitle = session.aiTags?.originalEventTitle || session.notes || '';
+          const eventDescription = session.aiTags?.originalEventDescription || '';
+          
+          const eventInfo = {
+            title: eventTitle,
+            description: eventDescription,
+            attendees: [],
+            location: ''
+          };
+          
+          // Try to find a better client match
+          const directMatch = this.findDirectMatch(eventInfo, clients);
+          
+          if (directMatch && directMatch.clientId !== session.clientId) {
+            // Update session with correct client
+            await storage.updateSession(session.id, { 
+              clientId: directMatch.clientId 
+            }, therapistId);
+            
+            reassigned++;
+            console.log(`[Calendar Sync] [RECONCILIATION] Reassigned session ${session.id} to client ${directMatch.client.firstName} ${directMatch.client.lastName}`);
+          }
+          
+        } catch (sessionError) {
+          const errorMsg = `Failed to process session ${session.id}: ${sessionError instanceof Error ? sessionError.message : String(sessionError)}`;
+          console.error(`[Calendar Sync] [RECONCILIATION] ${errorMsg}`);
+          errors.push(errorMsg);
+        }
+      }
+      
+      console.log(`[Calendar Sync] [RECONCILIATION] Completed: ${processed} processed, ${reassigned} reassigned`);
+      this.logAuditEvent('session_reconciliation_completed', therapistId, true, `${processed} processed, ${reassigned} reassigned`);
+      
+      return { processed, reassigned, errors };
+      
+    } catch (error) {
+      console.error('[Calendar Sync] [RECONCILIATION] Reconciliation failed:', error);
+      this.logAuditEvent('session_reconciliation_failed', therapistId, false, error instanceof Error ? error.message : String(error));
+      throw error;
     }
   }
 }
