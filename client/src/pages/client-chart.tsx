@@ -190,7 +190,10 @@ export default function ClientChart() {
                       </Badge>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => recomputeInsights.mutate()} disabled={recomputeInsights.isPending}>
+                      <Button variant="outline" size="sm" onClick={() => {
+                        console.log('🔄 Refresh clicked - recomputing insights');
+                        recomputeInsights.mutate();
+                      }} disabled={recomputeInsights.isPending}>
                         {recomputeInsights.isPending ? (
                           <i className="fas fa-spinner fa-spin mr-1"></i>
                         ) : (
@@ -223,20 +226,27 @@ export default function ClientChart() {
                           )}
                         </div>
                         <div className="text-lg font-semibold">
-                          {clientAITags?.therapyTrajectory?.overallProgress ? (
+                          {/* FIX: Read from actual insights data structure */}
+                          {clientAITags?.summary?.currentStatus ? (
                             <span className={
-                              clientAITags.therapyTrajectory.overallProgress === 'improving' ? 'text-green-600' :
-                              clientAITags.therapyTrajectory.overallProgress === 'declining' ? 'text-red-600' :
+                              clientAITags.summary.currentStatus === 'active' ? 'text-green-600' :
+                              clientAITags.summary.currentStatus === 'inactive' ? 'text-red-600' :
                               'text-blue-600'
                             }>
-                              {clientAITags.therapyTrajectory.overallProgress.replace('_', ' ').toUpperCase()}
+                              {clientAITags.summary.currentStatus.replace('_', ' ').toUpperCase()}
+                            </span>
+                          ) : clientAITags?.treatmentResponse?.goalsProgress?.length ? (
+                            <span className="text-green-600">
+                              IN PROGRESS
                             </span>
                           ) : (
                             <span className="text-muted-foreground">No data</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          {clientAITags?.therapyTrajectory?.treatmentPhase || 'Assessment needed'}
+                          {clientAITags?.summary?.totalSessions ? 
+                            `${clientAITags.summary.totalSessions} session${clientAITags.summary.totalSessions !== 1 ? 's' : ''} completed` : 
+                            'Assessment needed'}
                         </p>
                       </div>
 
@@ -253,23 +263,26 @@ export default function ClientChart() {
                           } />
                         </div>
                         <div className="text-lg font-semibold">
-                          {clientAITags?.riskProfile?.overallRiskLevel ? (
+                          {/* FIX: Read from riskAssessment instead of riskProfile */}
+                          {clientAITags?.riskAssessment?.currentRiskLevel ? (
                             <span className={
-                              clientAITags.riskProfile.overallRiskLevel === 'high' || clientAITags.riskProfile.overallRiskLevel === 'very_high' ? 
+                              clientAITags.riskAssessment.currentRiskLevel === 'high' || clientAITags.riskAssessment.currentRiskLevel === 'very_high' ? 
                               'text-red-600' :
-                              clientAITags.riskProfile.overallRiskLevel === 'moderate' ?
+                              clientAITags.riskAssessment.currentRiskLevel === 'moderate' ?
                               'text-orange-600' :
                               'text-green-600'
                             }>
-                              {clientAITags.riskProfile.overallRiskLevel.replace('_', ' ').toUpperCase()}
+                              {clientAITags.riskAssessment.currentRiskLevel.replace('_', ' ').toUpperCase()}
                             </span>
                           ) : (
                             <span className="text-muted-foreground">Unknown</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          {clientAITags?.riskProfile?.riskFactors?.length ? 
-                            `${clientAITags.riskProfile.riskFactors.length} risk factor${clientAITags.riskProfile.riskFactors.length !== 1 ? 's' : ''}` : 
+                          {clientAITags?.riskAssessment?.riskFactors?.length ? 
+                            `${clientAITags.riskAssessment.riskFactors.length} risk factor${clientAITags.riskAssessment.riskFactors.length !== 1 ? 's' : ''}` : 
+                            clientAITags?.riskAssessment?.warningSigna?.length ?
+                            `${clientAITags.riskAssessment.warningSigna.length} warning sign${clientAITags.riskAssessment.warningSigna.length !== 1 ? 's' : ''} identified` :
                             'No risk factors identified'}
                         </p>
                       </div>
@@ -281,14 +294,25 @@ export default function ClientChart() {
                           <Target className="w-4 h-4 text-blue-600" />
                         </div>
                         <div className="text-lg font-semibold text-blue-600">
-                          {clientAITags?.treatmentResponse?.mostEffectiveInterventions?.length ? (
-                            `${clientAITags.treatmentResponse.mostEffectiveInterventions.length} Effective`
+                          {/* FIX: Read from goalsProgress instead of mostEffectiveInterventions */}
+                          {clientAITags?.treatmentResponse?.goalsProgress?.length ? (
+                            `${clientAITags.treatmentResponse.goalsProgress.length} Goal${clientAITags.treatmentResponse.goalsProgress.length !== 1 ? 's' : ''} Active`
+                          ) : clientAITags?.treatmentResponse?.facilitators?.length ? (
+                            `${clientAITags.treatmentResponse.facilitators.length} Facilitator${clientAITags.treatmentResponse.facilitators.length !== 1 ? 's' : ''}`
                           ) : (
                             <span className="text-muted-foreground">Assessing</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          {clientAITags?.treatmentResponse?.responseToHomework || 'Response being evaluated'}
+                          {clientAITags?.treatmentResponse?.goalsProgress?.length ? (
+                            (() => {
+                              const avgProgress = Math.round(
+                                clientAITags.treatmentResponse.goalsProgress.reduce((sum, goal) => sum + (goal.progressPercent || 0), 0) / 
+                                clientAITags.treatmentResponse.goalsProgress.length
+                              );
+                              return `${avgProgress}% average progress`;
+                            })()
+                          ) : 'Response being evaluated'}
                         </p>
                       </div>
                     </div>

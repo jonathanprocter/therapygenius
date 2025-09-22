@@ -138,11 +138,12 @@ export function useClientAITags(clientId: string) {
       try {
         const response = await apiRequest('GET', `/api/clients/${clientId}/ai-tags`);
         const data = await response.json();
-        return data;
+        // Return just the tags data, not the full API response
+        return data.tags || null;
       } catch (error: any) {
         // Enhanced error handling for queries
         if (error.message?.includes('404')) {
-          return { hasAITags: false, tags: null };
+          return null;
         }
         throw new Error(`Failed to fetch client AI tags: ${error.message || 'Unknown error'}`);
       }
@@ -532,10 +533,11 @@ export function useClientInsights(clientId: string) {
       try {
         const response = await apiRequest('GET', `/api/clients/${clientId}/insights`);
         const data = await response.json();
-        return data;
+        // Return just the insights data, not the full API response
+        return data.insights || null;
       } catch (error: any) {
         if (error.message?.includes('404')) {
-          return { insights: null, hasInsights: false };
+          return null;
         }
         throw new Error(`Failed to fetch client insights: ${error.message || 'Unknown error'}`);
       }
@@ -560,7 +562,9 @@ export function useRecomputeClientInsights(clientId: string) {
       return response.json();
     },
     onSuccess: (data) => {
+      console.log('🎉 Insights recomputed successfully, invalidating caches:', data);
       queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'insights'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'ai-tags'] });
       queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId] });
       queryClient.invalidateQueries({ queryKey: ['/api/clinical-insights/summary'] });
       toast({
