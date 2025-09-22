@@ -627,19 +627,120 @@ class CalendarSyncService {
    * Direct string matching for client names
    */
   private findDirectMatch(eventInfo: any, clients: any[]): ClientMatch | null {
+    const eventTitle = eventInfo.title.toLowerCase();
+    
     for (const client of clients) {
       const fullName = `${client.firstName} ${client.lastName}`.toLowerCase();
-      const eventTitle = eventInfo.title.toLowerCase();
+      const firstName = client.firstName.toLowerCase();
+      const lastName = client.lastName.toLowerCase();
       
-      // Check if client name appears in event title
-      if (eventTitle.includes(client.firstName.toLowerCase()) && 
-          eventTitle.includes(client.lastName.toLowerCase())) {
+      // Standard check: both first and last name appear in event title
+      if (eventTitle.includes(firstName) && eventTitle.includes(lastName)) {
         return {
           clientId: client.id,
           confidence: 0.9,
           matchReason: 'Direct name match in event title',
           client
         };
+      }
+
+      // SimplePractice format: "My Bookable Calendar w/ [Name]"
+      const simplePracticeMatch = eventTitle.match(/my bookable calendar w\/ (.+)/);
+      if (simplePracticeMatch) {
+        const extractedName = simplePracticeMatch[1].trim();
+        
+        // Check if extracted name matches client's full name
+        if (extractedName === fullName) {
+          return {
+            clientId: client.id,
+            confidence: 0.9,
+            matchReason: 'SimplePractice calendar format match',
+            client
+          };
+        }
+        
+        // Check if extracted name contains both first and last name
+        if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
+          return {
+            clientId: client.id,
+            confidence: 0.85,
+            matchReason: 'SimplePractice partial name match',
+            client
+          };
+        }
+
+        // Check if extracted name matches just first name (for single-name clients)
+        if (extractedName === firstName || extractedName === lastName) {
+          return {
+            clientId: client.id,
+            confidence: 0.75,
+            matchReason: 'SimplePractice single name match',
+            client
+          };
+        }
+      }
+
+      // SimplePractice specific patterns from actual usage
+      const simplePracticePatterns = [
+        /dr procter\/(.+)$/,           // "Dr Procter/ClientName"
+        /^(.+) evaluation meeting$/,    // "ClientName Evaluation Meeting"
+        /^(.+) social work evaluation$/, // "ClientName social work evaluation"
+        /^(.+) therapy$/,              // "ClientName therapy" 
+        /^(.+) session$/,              // "ClientName session"
+        /^(.+) appointment$/,          // "ClientName appointment"
+        /^(.+) meeting$/               // "ClientName meeting"
+      ];
+
+      for (const pattern of simplePracticePatterns) {
+        const match = eventTitle.match(pattern);
+        if (match) {
+          const extractedName = match[1].trim().toLowerCase();
+          
+          // Check for exact first name or last name match
+          if (extractedName === firstName || extractedName === lastName) {
+            return {
+              clientId: client.id,
+              confidence: 0.85,
+              matchReason: 'SimplePractice name pattern match',
+              client
+            };
+          }
+          
+          // Check if extracted name contains first or last name
+          if (extractedName.includes(firstName) || extractedName.includes(lastName)) {
+            return {
+              clientId: client.id,
+              confidence: 0.8,
+              matchReason: 'SimplePractice partial name match',
+              client
+            };
+          }
+        }
+      }
+
+      // Alternative calendar formats: check for patterns like "Session with [Name]", "[Name] - Therapy", etc.
+      const namePatterns = [
+        /session with (.+)/,
+        /appointment with (.+)/,
+        /therapy.+with (.+)/,
+        /(.+) - therapy/,
+        /(.+) - session/,
+        /(.+) appointment/
+      ];
+
+      for (const pattern of namePatterns) {
+        const match = eventTitle.match(pattern);
+        if (match) {
+          const extractedName = match[1].trim();
+          if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
+            return {
+              clientId: client.id,
+              confidence: 0.8,
+              matchReason: 'Pattern-based name match',
+              client
+            };
+          }
+        }
       }
 
       // Check attendee emails
