@@ -137,6 +137,8 @@ export const assessments = pgTable("assessments", {
   scores: jsonb("scores").notNull(),
   interpretation: text("interpretation"),
   recommendations: text("recommendations"),
+  // AI assessment metadata for provenance tracking
+  metadata: jsonb("metadata"), // { sourceDocumentId, model, confidence, instrument, version, extractionMethod }
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

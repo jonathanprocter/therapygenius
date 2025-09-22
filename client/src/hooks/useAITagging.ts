@@ -420,3 +420,301 @@ export function useBulkGenerateClientTags() {
     },
   });
 }
+
+// Document Assessment Generation Hooks
+export function useGenerateDocumentAssessments(documentId: string) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', `/api/documents/${documentId}/generate-assessments`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/documents', documentId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/documents'] });
+      // Invalidate assessments for the client if document is linked to one
+      if (data.clientId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/clients', data.clientId, 'assessments'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/clients', data.clientId, 'insights'] });
+      }
+      toast({
+        title: 'Assessments Generated',
+        description: `Successfully extracted ${data.assessmentsFound || 0} assessments from document.`,
+        variant: 'default',
+      });
+    },
+    onError: (error: any) => {
+      let errorTitle = 'Assessment Generation Failed';
+      let errorDescription = 'Failed to generate assessments from document';
+      
+      if (error.message?.includes('401')) {
+        errorTitle = 'Authentication Required';
+        errorDescription = 'Please log in to generate assessments';
+      } else if (error.message?.includes('403')) {
+        errorTitle = 'Access Denied';
+        errorDescription = 'You do not have permission to generate assessments for this document';
+      } else if (error.message?.includes('404')) {
+        errorTitle = 'Document Not Found';
+        errorDescription = 'The document could not be found';
+      } else if (error.message?.includes('500')) {
+        errorTitle = 'Server Error';
+        errorDescription = 'The assessment generation service is temporarily unavailable. Please try again later.';
+      } else if (error.message) {
+        errorDescription = error.message;
+      }
+      
+      toast({
+        title: errorTitle,
+        description: errorDescription,
+        variant: 'destructive',
+      });
+    },
+  });
+}
+
+// Client Assessment Generation Hooks (Batch)
+export function useGenerateClientAssessments(clientId: string) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', `/api/clients/${clientId}/generate-assessments`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'assessments'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'insights'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/documents'] });
+      toast({
+        title: 'Batch Assessment Generation Complete',
+        description: `Successfully processed ${data.documentsProcessed || 0} documents and generated ${data.assessmentsCreated || 0} assessments.`,
+        variant: 'default',
+      });
+    },
+    onError: (error: any) => {
+      let errorTitle = 'Batch Assessment Generation Failed';
+      let errorDescription = 'Failed to generate assessments for client';
+      
+      if (error.message?.includes('401')) {
+        errorTitle = 'Authentication Required';
+        errorDescription = 'Please log in to generate assessments';
+      } else if (error.message?.includes('403')) {
+        errorTitle = 'Access Denied';
+        errorDescription = 'You do not have permission to generate assessments for this client';
+      } else if (error.message?.includes('404')) {
+        errorTitle = 'Client Not Found';
+        errorDescription = 'The client could not be found';
+      } else if (error.message?.includes('500')) {
+        errorTitle = 'Server Error';
+        errorDescription = 'The assessment generation service is temporarily unavailable. Please try again later.';
+      } else if (error.message) {
+        errorDescription = error.message;
+      }
+      
+      toast({
+        title: errorTitle,
+        description: errorDescription,
+        variant: 'destructive',
+      });
+    },
+  });
+}
+
+// Client Insights Hooks
+export function useClientInsights(clientId: string) {
+  return useQuery({
+    queryKey: ['/api/clients', clientId, 'insights'],
+    queryFn: async () => {
+      try {
+        const response = await apiRequest('GET', `/api/clients/${clientId}/insights`);
+        const data = await response.json();
+        return data;
+      } catch (error: any) {
+        if (error.message?.includes('404')) {
+          return { insights: null, hasInsights: false };
+        }
+        throw new Error(`Failed to fetch client insights: ${error.message || 'Unknown error'}`);
+      }
+    },
+    enabled: !!clientId,
+    retry: (failureCount, error: any) => {
+      if (error.message?.includes('404') || error.message?.includes('403')) {
+        return false;
+      }
+      return failureCount < 2;
+    },
+  });
+}
+
+export function useRecomputeClientInsights(clientId: string) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', `/api/clients/${clientId}/insights/recompute`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'insights'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/clinical-insights/summary'] });
+      toast({
+        title: 'Insights Recomputed',
+        description: 'Client insights have been successfully recomputed with the latest data.',
+        variant: 'default',
+      });
+    },
+    onError: (error: any) => {
+      let errorTitle = 'Insights Recomputation Failed';
+      let errorDescription = 'Failed to recompute client insights';
+      
+      if (error.message?.includes('401')) {
+        errorTitle = 'Authentication Required';
+        errorDescription = 'Please log in to recompute insights';
+      } else if (error.message?.includes('403')) {
+        errorTitle = 'Access Denied';
+        errorDescription = 'You do not have permission to recompute insights for this client';
+      } else if (error.message?.includes('404')) {
+        errorTitle = 'Client Not Found';
+        errorDescription = 'The client could not be found';
+      } else if (error.message?.includes('500')) {
+        errorTitle = 'Server Error';
+        errorDescription = 'The insights service is temporarily unavailable. Please try again later.';
+      } else if (error.message) {
+        errorDescription = error.message;
+      }
+      
+      toast({
+        title: errorTitle,
+        description: errorDescription,
+        variant: 'destructive',
+      });
+    },
+  });
+}
+
+// Client Recommendations Hooks
+export function useGenerateClientRecommendations(clientId: string) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', `/api/clients/${clientId}/recommendations`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'insights'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId] });
+      toast({
+        title: 'Recommendations Generated',
+        description: 'AI-powered treatment recommendations have been generated successfully.',
+        variant: 'default',
+      });
+    },
+    onError: (error: any) => {
+      let errorTitle = 'Recommendation Generation Failed';
+      let errorDescription = 'Failed to generate treatment recommendations';
+      
+      if (error.message?.includes('401')) {
+        errorTitle = 'Authentication Required';
+        errorDescription = 'Please log in to generate recommendations';
+      } else if (error.message?.includes('403')) {
+        errorTitle = 'Access Denied';
+        errorDescription = 'You do not have permission to generate recommendations for this client';
+      } else if (error.message?.includes('404')) {
+        errorTitle = 'Client Not Found';
+        errorDescription = 'The client could not be found';
+      } else if (error.message?.includes('500')) {
+        errorTitle = 'Server Error';
+        errorDescription = 'The recommendation service is temporarily unavailable. Please try again later.';
+      } else if (error.message) {
+        errorDescription = error.message;
+      }
+      
+      toast({
+        title: errorTitle,
+        description: errorDescription,
+        variant: 'destructive',
+      });
+    },
+  });
+}
+
+// Client Reports Hooks
+export function useClientReports(clientId: string) {
+  return useQuery({
+    queryKey: ['/api/clients', clientId, 'reports'],
+    queryFn: async () => {
+      try {
+        const response = await apiRequest('GET', `/api/clients/${clientId}/reports`);
+        const data = await response.json();
+        return data;
+      } catch (error: any) {
+        if (error.message?.includes('404')) {
+          return { reports: [], hasReports: false };
+        }
+        throw new Error(`Failed to fetch client reports: ${error.message || 'Unknown error'}`);
+      }
+    },
+    enabled: !!clientId,
+    retry: (failureCount, error: any) => {
+      if (error.message?.includes('404') || error.message?.includes('403')) {
+        return false;
+      }
+      return failureCount < 2;
+    },
+  });
+}
+
+export function useGenerateClientReport(clientId: string) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (reportType: string = 'progress_report') => {
+      const response = await apiRequest('POST', `/api/clients/${clientId}/reports/generate`, { reportType });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/clients', clientId, 'reports'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/documents'] });
+      toast({
+        title: 'Report Generated',
+        description: `Clinical report has been generated successfully and saved as a document.`,
+        variant: 'default',
+      });
+    },
+    onError: (error: any) => {
+      let errorTitle = 'Report Generation Failed';
+      let errorDescription = 'Failed to generate clinical report';
+      
+      if (error.message?.includes('401')) {
+        errorTitle = 'Authentication Required';
+        errorDescription = 'Please log in to generate reports';
+      } else if (error.message?.includes('403')) {
+        errorTitle = 'Access Denied';
+        errorDescription = 'You do not have permission to generate reports for this client';
+      } else if (error.message?.includes('404')) {
+        errorTitle = 'Client Not Found';
+        errorDescription = 'The client could not be found';
+      } else if (error.message?.includes('500')) {
+        errorTitle = 'Server Error';
+        errorDescription = 'The report generation service is temporarily unavailable. Please try again later.';
+      } else if (error.message) {
+        errorDescription = error.message;
+      }
+      
+      toast({
+        title: errorTitle,
+        description: errorDescription,
+        variant: 'destructive',
+      });
+    },
+  });
+}

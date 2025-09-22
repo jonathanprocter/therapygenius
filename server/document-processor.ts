@@ -258,6 +258,9 @@ export const processDocumentWithAutoLinking = async (
         },
         context.therapistId
       );
+
+      // Step 1.5: Assessment Generation (NEW)
+      await triggerAssessmentGeneration(document, analysisResults, context);
     } catch (error) {
       console.error('[Document Processor] Analysis failed:', error);
       result.errors?.push(`Analysis failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -637,4 +640,198 @@ const createDeterministicSessionMatching = (
     };
   }).filter(match => match.confidence > 0.3)
     .sort((a, b) => b.confidence - a.confidence);
+};
+
+/**
+ * Trigger assessment generation from uploaded documents when appropriate
+ * This function is called during document processing to automatically extract assessments
+ */
+const triggerAssessmentGeneration = async (
+  document: Document,
+  analysisResults: any,
+  context: DocumentUploadContext
+): Promise<void> => {
+  try {
+    console.log(`[Document Processor] Checking document ${document.id} for assessment content`);
+
+    // Only proceed if document has a client ID and content
+    if (!context.clientId || !document.content) {
+      console.log('[Document Processor] Skipping assessment generation - no client ID or content');
+      return;
+    }
+
+    // Check if document likely contains assessment content
+    const hasAssessmentContent = detectAssessmentContent(document, analysisResults);
+    
+    if (!hasAssessmentContent) {
+      console.log('[Document Processor] No assessment content detected, skipping extraction');
+      return;
+    }
+
+    console.log(`[Document Processor] Assessment content detected in document ${document.id}, triggering extraction`);
+
+    // Import and use the assessment extractor service
+    const { assessmentExtractor } = await import('./assessment-extractor');
+    
+    // Extract assessments from the document (non-blocking)
+    const extractionResult = await assessmentExtractor.extractAssessmentsFromDocument(
+      document.id,
+      context.therapistId,
+      {
+        clientId: context.clientId,
+        includeAIAnalysis: true,
+        confidenceThreshold: 0.7
+      }
+    );
+
+    if (extractionResult.success && extractionResult.assessments && extractionResult.assessments.length > 0) {
+      console.log(`[Document Processor] Successfully extracted ${extractionResult.assessments.length} assessments from document ${document.id}`);
+
+      // Trigger insights recomputation for the client (async, non-blocking)
+      // This will update client insights with the new assessment data
+      triggerInsightsRecomputation(context.clientId!, context.therapistId)
+        .catch(error => {
+          console.error('[Document Processor] Error in async insights recomputation:', error);
+        });
+
+      // Mark document as processed for assessments
+      await storage.markDocumentAsProcessedForAssessments(document.id, context.therapistId);
+      
+    } else {
+      console.log(`[Document Processor] No assessments extracted from document ${document.id}`);
+      if (extractionResult.errors && extractionResult.errors.length > 0) {
+        console.log('[Document Processor] Assessment extraction errors:', extractionResult.errors);
+      }
+    }
+
+  } catch (error) {
+    // Log error but don't throw - we don't want assessment generation failures to break document processing
+    console.error(`[Document Processor] Error in assessment generation for document ${document.id}:`, error);
+  }
+};
+
+/**
+ * Detect if a document likely contains assessment content
+ */
+const detectAssessmentContent = (document: Document, analysisResults: any): boolean => {
+  const content = document.content?.toLowerCase() || '';
+  const fileName = document.fileName.toLowerCase();
+  
+  // Common assessment instrument indicators
+  const assessmentIndicators = [
+    // Specific assessment names
+    'phq-9', 'phq9', 'patient health questionnaire',
+    'gad-7', 'gad7', 'generalized anxiety disorder',
+    'beck depression inventory', 'bdi-ii', 'bdi',
+    'pcl-5', 'ptsd checklist',
+    'ham-d', 'hamilton depression',
+    'madrs', 'montgomery',
+    'y-bocs', 'yale-brown',
+    'dass-21', 'dass21',
+    'whodas', 'who disability',
+    
+    // Assessment-related terms
+    'assessment score', 'questionnaire score', 'scale score',
+    'total score', 'severity score', 'rating scale',
+    'clinical assessment', 'psychological assessment',
+    'screening tool', 'diagnostic tool',
+    
+    // Scoring patterns
+    'score:', 'scored', 'points', 'out of', 
+    'mild', 'moderate', 'severe', 'minimal',
+    'interpretation:', 'result:', 'findings:',
+    
+    // Item response patterns (common in assessments)
+    'not at all', 'several days', 'more than half', 'nearly every day',
+    'strongly disagree', 'strongly agree',
+    'never', 'sometimes', 'often', 'always'
+  ];
+
+  // Check filename for assessment indicators
+  const fileNameHasAssessment = assessmentIndicators.some(indicator => 
+    fileName.includes(indicator.replace(/[^a-z0-9]/g, ''))
+  );
+
+  // Check content for assessment indicators
+  const contentHasAssessment = assessmentIndicators.some(indicator => 
+    content.includes(indicator)
+  );
+
+  // Check for numerical scoring patterns (e.g., "Score: 15/27", "Total: 8")
+  const scoringPatterns = [
+    /score[:\s]*\d+/i,
+    /total[:\s]*\d+/i,
+    /\d+\s*\/\s*\d+/,  // "15/27" format
+    /\d+\s*out of\s*\d+/i,
+    /severity[:\s]*\w+/i
+  ];
+  
+  const hasNumericalScoring = scoringPatterns.some(pattern => pattern.test(content));
+
+  // Check analysis results for assessment-related tags/categories
+  const analysisHasAssessment = analysisResults && (
+    (analysisResults.tags && analysisResults.tags.some((tag: string) => 
+      tag.toLowerCase().includes('assessment') || 
+      tag.toLowerCase().includes('questionnaire') ||
+      tag.toLowerCase().includes('scale') ||
+      tag.toLowerCase().includes('score')
+    )) ||
+    (analysisResults.category && 
+      ['assessment', 'questionnaire', 'screening', 'evaluation'].includes(analysisResults.category.toLowerCase())
+    )
+  );
+
+  // Document likely contains assessment content if:
+  // 1. Filename suggests it's an assessment, OR
+  // 2. Content has assessment indicators AND (numerical scoring OR analysis confirms assessment)
+  const likelyHasAssessment = fileNameHasAssessment || 
+    (contentHasAssessment && (hasNumericalScoring || analysisHasAssessment));
+
+  if (likelyHasAssessment) {
+    console.log(`[Document Processor] Assessment content detected in ${document.fileName}:`, {
+      fileNameMatch: fileNameHasAssessment,
+      contentMatch: contentHasAssessment,
+      numericalScoring: hasNumericalScoring,
+      analysisMatch: analysisHasAssessment
+    });
+  }
+
+  return likelyHasAssessment;
+};
+
+/**
+ * Trigger insights recomputation for a client (async)
+ * This is called after new assessments are generated to update client insights
+ */
+const triggerInsightsRecomputation = async (clientId: string, therapistId: string): Promise<void> => {
+  try {
+    console.log(`[Document Processor] Triggering insights recomputation for client ${clientId}`);
+
+    // Import the insights aggregator service
+    const { insightsAggregator } = await import('./insights-aggregator');
+    
+    // Compute fresh insights for the client
+    const result = await insightsAggregator.computeClientInsights(
+      clientId,
+      therapistId,
+      {
+        forceRecompute: true,
+        includeProgressAnalysis: true,
+        includeRiskAssessment: true,
+        includeTreatmentResponse: true
+      }
+    );
+
+    if (result.success && result.insights) {
+      // Store the computed insights
+      await storage.storeClientInsights(clientId, result.insights, therapistId);
+      console.log(`[Document Processor] Successfully updated insights for client ${clientId}`);
+    } else {
+      console.log(`[Document Processor] Failed to recompute insights for client ${clientId}:`, result.errors);
+    }
+
+  } catch (error) {
+    console.error(`[Document Processor] Error recomputing insights for client ${clientId}:`, error);
+    // Don't throw - this is a background process
+  }
 };

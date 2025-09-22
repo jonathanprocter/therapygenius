@@ -8,8 +8,9 @@ import { Separator } from "@/components/ui/separator";
 import { DocumentUpload } from "./DocumentUpload";
 import { DocumentAutoLinking } from "./DocumentAutoLinking";
 import { useDocuments, useSearchDocuments, useDeleteDocument } from "@/hooks/useDocuments";
+import { useGenerateDocumentAssessments } from "@/hooks/useAITagging";
 import { cn } from "@/lib/utils";
-import { Link2, Calendar, Target, AlertTriangle } from "lucide-react";
+import { Link2, Calendar, Target, AlertTriangle, Brain, CheckCircle, Clock, Zap } from "lucide-react";
 import type { Document } from "@shared/schema";
 
 export function DocumentsView() {
@@ -89,6 +90,90 @@ export function DocumentsView() {
     const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  // Assessment status helper functions
+  const getAssessmentStatusIcon = (document: Document) => {
+    const assessmentMetadata = document.metadata?.assessmentExtraction;
+    
+    if (assessmentMetadata?.assessmentsFound && assessmentMetadata.assessmentsFound.length > 0) {
+      return <CheckCircle className="w-4 h-4 text-green-600" title={`${assessmentMetadata.assessmentsFound.length} assessments found`} />;
+    }
+    
+    if (assessmentMetadata?.processingStatus === 'processing') {
+      return <Clock className="w-4 h-4 text-blue-600" title="Processing assessments..." />;
+    }
+    
+    if (assessmentMetadata?.hasAssessmentContent) {
+      return <Brain className="w-4 h-4 text-purple-600" title="Contains assessment content" />;
+    }
+    
+    return null;
+  };
+
+  const getAssessmentStatusBadge = (document: Document) => {
+    const assessmentMetadata = document.metadata?.assessmentExtraction;
+    
+    if (assessmentMetadata?.assessmentsFound && assessmentMetadata.assessmentsFound.length > 0) {
+      return (
+        <Badge variant="outline" className="text-xs text-green-600 border-green-200 bg-green-50">
+          {assessmentMetadata.assessmentsFound.length} Assessment{assessmentMetadata.assessmentsFound.length > 1 ? 's' : ''}
+        </Badge>
+      );
+    }
+    
+    if (assessmentMetadata?.processingStatus === 'processing') {
+      return (
+        <Badge variant="outline" className="text-xs text-blue-600 border-blue-200 bg-blue-50">
+          Processing...
+        </Badge>
+      );
+    }
+    
+    return null;
+  };
+
+  const canGenerateAssessments = (document: Document) => {
+    const assessmentMetadata = document.metadata?.assessmentExtraction;
+    const isProcessing = assessmentMetadata?.processingStatus === 'processing';
+    const hasAssessments = assessmentMetadata?.assessmentsFound && assessmentMetadata.assessmentsFound.length > 0;
+    
+    // Can generate if document has content and isn't currently processing
+    return document.content && !isProcessing && document.metadata?.analysis?.category !== 'Other';
+  };
+
+  const DocumentAssessmentButton = ({ document }: { document: Document }) => {
+    const generateAssessments = useGenerateDocumentAssessments(document.id);
+    
+    if (!canGenerateAssessments(document)) {
+      return null;
+    }
+
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation();
+          generateAssessments.mutate();
+        }}
+        disabled={generateAssessments.isPending}
+        className="text-xs px-2 py-1 h-auto"
+        data-testid={`generate-assessments-${document.id}`}
+      >
+        {generateAssessments.isPending ? (
+          <>
+            <Clock className="w-3 h-3 mr-1" />
+            Processing...
+          </>
+        ) : (
+          <>
+            <Brain className="w-3 h-3 mr-1" />
+            Extract Assessments
+          </>
+        )}
+      </Button>
+    );
   };
 
   if (isLoading) {
@@ -216,6 +301,7 @@ export function DocumentsView() {
                       </div>
                       <div className="flex items-center space-x-2">
                         {getDocumentStatusIcon(document)}
+                        {getAssessmentStatusIcon(document)}
                         {document.metadata?.analysis?.category && (
                           <Badge 
                             className={getCategoryColor(document.metadata.analysis.category)}
@@ -224,6 +310,7 @@ export function DocumentsView() {
                             {document.metadata.analysis.category}
                           </Badge>
                         )}
+                        {getAssessmentStatusBadge(document)}
                         {document.isProcessed && (
                           <i className="fas fa-magic text-purple-500 text-xs" title="AI Processed"></i>
                         )}
@@ -263,27 +350,35 @@ export function DocumentsView() {
                       </div>
                     )}
 
-                    {/* Auto-linking Status */}
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center space-x-2">
-                        {document.sessionId ? (
-                          <div className="flex items-center text-green-600">
-                            <Link2 className="w-3 h-3 mr-1" />
-                            <span>Linked</span>
-                          </div>
-                        ) : document.sourceEventId ? (
-                          <div className="flex items-center text-purple-600">
-                            <Calendar className="w-3 h-3 mr-1" />
-                            <span>Calendar</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center text-muted-foreground">
-                            <AlertTriangle className="w-3 h-3 mr-1" />
-                            <span>Unlinked</span>
-                          </div>
-                        )}
+                    {/* Status and Actions */}
+                    <div className="space-y-2">
+                      {/* Auto-linking Status */}
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center space-x-2">
+                          {document.sessionId ? (
+                            <div className="flex items-center text-green-600">
+                              <Link2 className="w-3 h-3 mr-1" />
+                              <span>Linked</span>
+                            </div>
+                          ) : document.sourceEventId ? (
+                            <div className="flex items-center text-purple-600">
+                              <Calendar className="w-3 h-3 mr-1" />
+                              <span>Calendar</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center text-muted-foreground">
+                              <AlertTriangle className="w-3 h-3 mr-1" />
+                              <span>Unlinked</span>
+                            </div>
+                          )}
+                        </div>
+                        {getConfidenceIndicator(document)}
                       </div>
-                      {getConfidenceIndicator(document)}
+                      
+                      {/* Assessment Actions */}
+                      <div className="flex items-center justify-end">
+                        <DocumentAssessmentButton document={document} />
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -301,6 +396,7 @@ export function DocumentsView() {
                     </div>
                     <div className="flex items-center space-x-2">
                       {getDocumentStatusIcon(document)}
+                      {getAssessmentStatusIcon(document)}
                       {document.metadata?.analysis?.category && (
                         <Badge 
                           className={getCategoryColor(document.metadata.analysis.category)}
@@ -309,10 +405,12 @@ export function DocumentsView() {
                           {document.metadata.analysis.category}
                         </Badge>
                       )}
+                      {getAssessmentStatusBadge(document)}
                       {getConfidenceIndicator(document)}
                       {document.isProcessed && (
                         <i className="fas fa-magic text-purple-500 text-xs" title="AI Processed"></i>
                       )}
+                      <DocumentAssessmentButton document={document} />
                     </div>
                   </>
                 )}

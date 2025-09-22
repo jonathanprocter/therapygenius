@@ -1430,6 +1430,509 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =====================================================
+  // NEW AI-POWERED ASSESSMENT AND REPORTING ENDPOINTS
+  // =====================================================
+
+  // Assessment generation endpoints
+  app.post("/api/documents/:id/generate-assessments", async (req: Request, res) => {
+    try {
+      const { id: documentId } = req.params;
+      const therapistId = THERAPIST_ID;
+
+      // Import the assessment extractor service
+      const { assessmentExtractor } = await import('./assessment-extractor');
+      
+      // Extract assessments from the document
+      const result = await assessmentExtractor.extractAssessmentsFromDocument(
+        documentId,
+        therapistId
+      );
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to extract assessments",
+          errors: result.errors
+        });
+      }
+
+      res.json({
+        success: true,
+        documentId,
+        assessments: result.assessments,
+        metadata: result.metadata
+      });
+
+    } catch (error) {
+      console.error("Error generating assessments from document:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to generate assessments from document"
+      });
+    }
+  });
+
+  app.post("/api/clients/:id/generate-assessments", async (req: Request, res) => {
+    try {
+      const { id: clientId } = req.params;
+      const therapistId = THERAPIST_ID;
+      const { documentIds, reprocessExisting = false } = req.body;
+
+      // Import the assessment extractor service
+      const { assessmentExtractor } = await import('./assessment-extractor');
+      
+      // Extract assessments for all client documents or specified documents
+      const result = await assessmentExtractor.extractAssessmentsForClient(
+        clientId,
+        therapistId,
+        {
+          documentIds,
+          reprocessExisting,
+          includeAIAnalysis: true
+        }
+      );
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to extract assessments for client",
+          errors: result.errors
+        });
+      }
+
+      res.json({
+        success: true,
+        clientId,
+        assessments: result.assessments,
+        metadata: result.metadata
+      });
+
+    } catch (error) {
+      console.error("Error generating assessments for client:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to generate assessments for client"
+      });
+    }
+  });
+
+  // Insights endpoints
+  app.get("/api/clients/:id/insights", async (req: Request, res) => {
+    try {
+      const { id: clientId } = req.params;
+      const therapistId = THERAPIST_ID;
+
+      // Get cached insights from storage
+      const cachedInsights = await storage.getStoredClientInsights(clientId, therapistId);
+      
+      if (cachedInsights) {
+        res.json({
+          success: true,
+          clientId,
+          insights: cachedInsights,
+          cached: true,
+          lastUpdated: cachedInsights.metadata?.generatedDate || null
+        });
+      } else {
+        // No cached insights available, suggest recomputation
+        res.json({
+          success: true,
+          clientId,
+          insights: null,
+          cached: false,
+          message: "No insights available. Use /insights/recompute to generate new insights."
+        });
+      }
+
+    } catch (error) {
+      console.error("Error fetching client insights:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch client insights"
+      });
+    }
+  });
+
+  app.post("/api/clients/:id/insights/recompute", async (req: Request, res) => {
+    try {
+      const { id: clientId } = req.params;
+      const therapistId = THERAPIST_ID;
+      const { forceRecompute = false, includeRecommendations = true } = req.body;
+
+      // Import the insights aggregator service
+      const { insightsAggregator } = await import('./insights-aggregator');
+      
+      // Compute fresh insights for the client
+      const result = await insightsAggregator.computeClientInsights(
+        clientId,
+        therapistId,
+        {
+          forceRecompute,
+          includeProgressAnalysis: true,
+          includeRiskAssessment: true,
+          includeTreatmentResponse: true
+        }
+      );
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to recompute client insights",
+          errors: result.errors
+        });
+      }
+
+      // Store the computed insights
+      await storage.storeClientInsights(clientId, result.insights, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        insights: result.insights,
+        metadata: result.metadata,
+        recomputed: true
+      });
+
+    } catch (error) {
+      console.error("Error recomputing client insights:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to recompute client insights"
+      });
+    }
+  });
+
+  // Recommendations endpoint
+  app.post("/api/clients/:id/recommendations", async (req: Request, res) => {
+    try {
+      const { id: clientId } = req.params;
+      const therapistId = THERAPIST_ID;
+      const { 
+        focusAreas = [], 
+        includeMedication = true, 
+        includeRiskManagement = true, 
+        urgentOnly = false 
+      } = req.body;
+
+      // Import the recommendation engine service
+      const { recommendationEngine } = await import('./recommendation-engine');
+      
+      // Generate treatment recommendations
+      const result = await recommendationEngine.generateRecommendations(
+        clientId,
+        therapistId,
+        {
+          focusAreas,
+          includeMedication,
+          includeRiskManagement,
+          urgentOnly
+        }
+      );
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to generate recommendations",
+          errors: result.errors
+        });
+      }
+
+      // Store the recommendations for audit trail
+      await storage.storeRecommendations(clientId, result.recommendations, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        recommendations: result.recommendations,
+        metadata: result.metadata
+      });
+
+    } catch (error) {
+      console.error("Error generating recommendations:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to generate recommendations"
+      });
+    }
+  });
+
+  // Report generation and retrieval endpoints
+  app.post("/api/clients/:id/reports/generate", async (req: Request, res) => {
+    try {
+      const { id: clientId } = req.params;
+      const therapistId = THERAPIST_ID;
+      const { 
+        reportType = "progress_report",
+        dateRange,
+        includeAIAnalysis = true,
+        includeRecommendations = true,
+        includeProgressCharts = false,
+        confidentialityLevel = "standard"
+      } = req.body;
+
+      // Import the report composer service
+      const { reportComposer } = await import('./report-composer');
+      
+      // Generate the comprehensive report
+      const result = await reportComposer.generateReport(
+        clientId,
+        therapistId,
+        reportType,
+        {
+          dateRange: dateRange ? {
+            startDate: new Date(dateRange.startDate),
+            endDate: new Date(dateRange.endDate)
+          } : undefined,
+          includeAIAnalysis,
+          includeRecommendations,
+          includeProgressCharts,
+          confidentialityLevel
+        }
+      );
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to generate report",
+          errors: result.errors
+        });
+      }
+
+      res.json({
+        success: true,
+        clientId,
+        reportType,
+        report: result.report,
+        reportDocument: result.reportDocument,
+        metadata: result.metadata
+      });
+
+    } catch (error) {
+      console.error("Error generating client report:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to generate client report"
+      });
+    }
+  });
+
+  app.get("/api/clients/:id/reports", async (req: Request, res) => {
+    try {
+      const { id: clientId } = req.params;
+      const therapistId = THERAPIST_ID;
+      const { reportType, limit = 20 } = req.query;
+
+      // Get reports for the client
+      const reports = await storage.getReportsByClient(
+        clientId, 
+        therapistId, 
+        reportType as string
+      );
+
+      // Limit the results
+      const limitedReports = reports.slice(0, parseInt(limit as string));
+
+      res.json({
+        success: true,
+        clientId,
+        reports: limitedReports,
+        total: reports.length,
+        filtered: reportType ? true : false
+      });
+
+    } catch (error) {
+      console.error("Error fetching client reports:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch client reports"
+      });
+    }
+  });
+
+  // Additional utility endpoints for the AI pipeline
+  app.get("/api/assessments/statistics", async (req: Request, res) => {
+    try {
+      const therapistId = THERAPIST_ID;
+      const { startDate, endDate } = req.query;
+
+      const timeRange = startDate && endDate ? {
+        start: new Date(startDate as string),
+        end: new Date(endDate as string)
+      } : undefined;
+
+      const statistics = await storage.getAssessmentStatistics(therapistId, timeRange);
+
+      res.json({
+        success: true,
+        statistics,
+        timeRange
+      });
+
+    } catch (error) {
+      console.error("Error fetching assessment statistics:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch assessment statistics"
+      });
+    }
+  });
+
+  app.get("/api/clients/risk-summary", async (req: Request, res) => {
+    try {
+      const therapistId = THERAPIST_ID;
+
+      const riskSummary = await storage.getClientRiskSummary(therapistId);
+
+      res.json({
+        success: true,
+        riskSummary,
+        generatedAt: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error("Error fetching client risk summary:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch client risk summary"
+      });
+    }
+  });
+
+  app.get("/api/insights/generation-queue", async (req: Request, res) => {
+    try {
+      const therapistId = THERAPIST_ID;
+
+      const queue = await storage.getInsightsGenerationQueue(therapistId);
+
+      res.json({
+        success: true,
+        queue,
+        totalClients: queue.length
+      });
+
+    } catch (error) {
+      console.error("Error fetching insights generation queue:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch insights generation queue"
+      });
+    }
+  });
+
+  // Batch processing endpoints for efficiency
+  app.post("/api/batch/generate-assessments", async (req: Request, res) => {
+    try {
+      const therapistId = THERAPIST_ID;
+      const { clientIds, documentIds, limit = 50 } = req.body;
+
+      // Import the assessment extractor service
+      const { assessmentExtractor } = await import('./assessment-extractor');
+      
+      // Process batch assessment generation
+      const results = [];
+      const targetIds = clientIds || await storage.getClientIdsForBatchProcessing(
+        therapistId, 
+        { hasUnprocessedDocuments: true, limit }
+      );
+
+      for (const clientId of targetIds.slice(0, limit)) {
+        try {
+          const result = await assessmentExtractor.extractAssessmentsForClient(
+            clientId,
+            therapistId,
+            { documentIds: documentIds?.[clientId] }
+          );
+          
+          results.push({
+            clientId,
+            success: result.success,
+            assessments: result.assessments?.length || 0,
+            errors: result.errors
+          });
+        } catch (error) {
+          results.push({
+            clientId,
+            success: false,
+            assessments: 0,
+            errors: [error instanceof Error ? error.message : String(error)]
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        batchResults: results,
+        totalProcessed: results.length,
+        successCount: results.filter(r => r.success).length
+      });
+
+    } catch (error) {
+      console.error("Error in batch assessment generation:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to process batch assessment generation"
+      });
+    }
+  });
+
+  app.post("/api/batch/recompute-insights", async (req: Request, res) => {
+    try {
+      const therapistId = THERAPIST_ID;
+      const { clientIds, limit = 25 } = req.body;
+
+      // Import the insights aggregator service
+      const { insightsAggregator } = await import('./insights-aggregator');
+      
+      // Process batch insights recomputation
+      const results = [];
+      const targetIds = clientIds || await storage.getClientIdsForBatchProcessing(
+        therapistId, 
+        { needsInsightsUpdate: true, limit }
+      );
+
+      for (const clientId of targetIds.slice(0, limit)) {
+        try {
+          const result = await insightsAggregator.computeClientInsights(
+            clientId,
+            therapistId,
+            { forceRecompute: true }
+          );
+          
+          if (result.success) {
+            await storage.storeClientInsights(clientId, result.insights, therapistId);
+          }
+          
+          results.push({
+            clientId,
+            success: result.success,
+            errors: result.errors
+          });
+        } catch (error) {
+          results.push({
+            clientId,
+            success: false,
+            errors: [error instanceof Error ? error.message : String(error)]
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        batchResults: results,
+        totalProcessed: results.length,
+        successCount: results.filter(r => r.success).length
+      });
+
+    } catch (error) {
+      console.error("Error in batch insights recomputation:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to process batch insights recomputation"
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

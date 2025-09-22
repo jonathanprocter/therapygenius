@@ -149,6 +149,56 @@ export interface IStorage {
   getSessionTagTrends(clientId: string, therapistId: string, timeRange?: { start: Date; end: Date }): Promise<any>;
   getClientProgressInsights(clientId: string, therapistId: string): Promise<any>;
   getClinicalInsightsSummary(therapistId: string): Promise<any>;
+
+  // Assessment extraction and AI analysis methods
+  getAssessmentsByDocument(documentId: string, therapistId: string): Promise<Assessment[]>;
+  updateAssessmentMetadata(assessmentId: string, metadata: any, therapistId: string): Promise<Assessment | undefined>;
+  getAssessmentsByType(assessmentType: string, clientId: string, therapistId: string): Promise<Assessment[]>;
+  getLatestAssessments(clientId: string, therapistId: string, limit?: number): Promise<Assessment[]>;
+  
+  // Enhanced insights and recommendations storage
+  storeClientInsights(clientId: string, insights: any, therapistId: string): Promise<void>;
+  getStoredClientInsights(clientId: string, therapistId: string): Promise<any | null>;
+  storeRecommendations(clientId: string, recommendations: any, therapistId: string): Promise<void>;
+  getStoredRecommendations(clientId: string, therapistId: string): Promise<any | null>;
+  
+  // Report generation and storage
+  getReportsByClient(clientId: string, therapistId: string, reportType?: string): Promise<Document[]>;
+  getReportsByTherapist(therapistId: string, reportType?: string, limit?: number): Promise<Document[]>;
+  updateReportMetadata(reportId: string, metadata: any, therapistId: string): Promise<Document | undefined>;
+  
+  // Batch operations for AI processing
+  getClientIdsForBatchProcessing(therapistId: string, options?: { 
+    hasUnprocessedDocuments?: boolean; 
+    needsInsightsUpdate?: boolean;
+    limit?: number;
+  }): Promise<string[]>;
+  getDocumentIdsForAssessmentExtraction(therapistId: string, options?: {
+    clientId?: string;
+    unprocessedOnly?: boolean;
+    hasAssessmentContent?: boolean;
+    limit?: number;
+  }): Promise<string[]>;
+  markDocumentAsProcessedForAssessments(documentId: string, therapistId: string): Promise<void>;
+  
+  // Analytics and dashboard methods
+  getAssessmentStatistics(therapistId: string, timeRange?: { start: Date; end: Date }): Promise<{
+    totalAssessments: number;
+    assessmentsByType: Record<string, number>;
+    averageScores: Record<string, number>;
+    trendsAnalysis: any;
+  }>;
+  getClientRiskSummary(therapistId: string): Promise<{
+    clientId: string;
+    clientName: string;
+    riskLevel: string;
+    latestAssessment: any;
+  }[]>;
+  getInsightsGenerationQueue(therapistId: string): Promise<{
+    clientId: string;
+    priority: string;
+    lastUpdate: Date | null;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1145,6 +1195,584 @@ export class DatabaseStorage implements IStorage {
       console.error('[Storage] Error getting clinical insights summary:', error);
       throw new Error('Failed to get clinical insights summary');
     }
+  }
+
+  // Assessment extraction and AI analysis methods
+  async getAssessmentsByDocument(documentId: string, therapistId: string): Promise<Assessment[]> {
+    try {
+      return await db
+        .select()
+        .from(assessments)
+        .where(and(
+          eq(assessments.therapistId, therapistId),
+          sql`${assessments.metadata}->>'sourceDocumentId' = ${documentId}`
+        ))
+        .orderBy(desc(assessments.assessmentDate));
+    } catch (error) {
+      console.error('[Storage] Error getting assessments by document:', error);
+      throw new Error('Failed to get assessments by document');
+    }
+  }
+
+  async updateAssessmentMetadata(assessmentId: string, metadata: any, therapistId: string): Promise<Assessment | undefined> {
+    try {
+      const [updatedAssessment] = await db
+        .update(assessments)
+        .set({
+          metadata,
+          updatedAt: new Date()
+        })
+        .where(and(eq(assessments.id, assessmentId), eq(assessments.therapistId, therapistId)))
+        .returning();
+
+      return updatedAssessment;
+    } catch (error) {
+      console.error('[Storage] Error updating assessment metadata:', error);
+      throw new Error('Failed to update assessment metadata');
+    }
+  }
+
+  async getAssessmentsByType(assessmentType: string, clientId: string, therapistId: string): Promise<Assessment[]> {
+    try {
+      return await db
+        .select()
+        .from(assessments)
+        .where(and(
+          eq(assessments.clientId, clientId),
+          eq(assessments.therapistId, therapistId),
+          eq(assessments.assessmentType, assessmentType)
+        ))
+        .orderBy(desc(assessments.assessmentDate));
+    } catch (error) {
+      console.error('[Storage] Error getting assessments by type:', error);
+      throw new Error('Failed to get assessments by type');
+    }
+  }
+
+  async getLatestAssessments(clientId: string, therapistId: string, limit: number = 5): Promise<Assessment[]> {
+    try {
+      return await db
+        .select()
+        .from(assessments)
+        .where(and(
+          eq(assessments.clientId, clientId),
+          eq(assessments.therapistId, therapistId)
+        ))
+        .orderBy(desc(assessments.assessmentDate))
+        .limit(limit);
+    } catch (error) {
+      console.error('[Storage] Error getting latest assessments:', error);
+      throw new Error('Failed to get latest assessments');
+    }
+  }
+
+  // Enhanced insights and recommendations storage
+  async storeClientInsights(clientId: string, insights: any, therapistId: string): Promise<void> {
+    try {
+      await db
+        .update(clients)
+        .set({
+          aiTags: insights,
+          updatedAt: new Date()
+        })
+        .where(and(eq(clients.id, clientId), eq(clients.therapistId, therapistId)));
+    } catch (error) {
+      console.error('[Storage] Error storing client insights:', error);
+      throw new Error('Failed to store client insights');
+    }
+  }
+
+  async getStoredClientInsights(clientId: string, therapistId: string): Promise<any | null> {
+    try {
+      const [client] = await db
+        .select({ aiTags: clients.aiTags })
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.therapistId, therapistId)));
+
+      return client?.aiTags || null;
+    } catch (error) {
+      console.error('[Storage] Error getting stored client insights:', error);
+      throw new Error('Failed to get stored client insights');
+    }
+  }
+
+  async storeRecommendations(clientId: string, recommendations: any, therapistId: string): Promise<void> {
+    try {
+      // Store recommendations as a document for audit trail
+      const fileName = `recommendations_${clientId}_${new Date().toISOString().split('T')[0]}.json`;
+      
+      await db.insert(documents).values({
+        therapistId,
+        clientId,
+        fileName,
+        fileType: "application/json",
+        fileSize: JSON.stringify(recommendations).length,
+        filePath: `/recommendations/${fileName}`,
+        content: JSON.stringify(recommendations, null, 2),
+        metadata: {
+          type: "recommendations",
+          generatedDate: new Date().toISOString(),
+          category: "AI_Generated"
+        },
+        isProcessed: true,
+        analysis: {
+          category: "Recommendations",
+          type: "treatment_recommendations"
+        },
+        tags: ["recommendations", "ai_generated", "treatment_plan"]
+      });
+    } catch (error) {
+      console.error('[Storage] Error storing recommendations:', error);
+      throw new Error('Failed to store recommendations');
+    }
+  }
+
+  async getStoredRecommendations(clientId: string, therapistId: string): Promise<any | null> {
+    try {
+      const [document] = await db
+        .select()
+        .from(documents)
+        .where(and(
+          eq(documents.clientId, clientId),
+          eq(documents.therapistId, therapistId),
+          sql`${documents.metadata}->>'type' = 'recommendations'`
+        ))
+        .orderBy(desc(documents.uploadDate))
+        .limit(1);
+
+      if (document?.content) {
+        return JSON.parse(document.content);
+      }
+      return null;
+    } catch (error) {
+      console.error('[Storage] Error getting stored recommendations:', error);
+      throw new Error('Failed to get stored recommendations');
+    }
+  }
+
+  // Report generation and storage
+  async getReportsByClient(clientId: string, therapistId: string, reportType?: string): Promise<Document[]> {
+    try {
+      let query = db
+        .select()
+        .from(documents)
+        .where(and(
+          eq(documents.clientId, clientId),
+          eq(documents.therapistId, therapistId),
+          sql`${documents.metadata}->>'category' = 'Report'`
+        ));
+
+      if (reportType) {
+        query = query.where(and(
+          eq(documents.clientId, clientId),
+          eq(documents.therapistId, therapistId),
+          sql`${documents.metadata}->>'category' = 'Report'`,
+          sql`${documents.metadata}->>'reportType' = ${reportType}`
+        ));
+      }
+
+      return await query.orderBy(desc(documents.uploadDate));
+    } catch (error) {
+      console.error('[Storage] Error getting reports by client:', error);
+      throw new Error('Failed to get reports by client');
+    }
+  }
+
+  async getReportsByTherapist(therapistId: string, reportType?: string, limit: number = 50): Promise<Document[]> {
+    try {
+      let query = db
+        .select()
+        .from(documents)
+        .where(and(
+          eq(documents.therapistId, therapistId),
+          sql`${documents.metadata}->>'category' = 'Report'`
+        ));
+
+      if (reportType) {
+        query = query.where(and(
+          eq(documents.therapistId, therapistId),
+          sql`${documents.metadata}->>'category' = 'Report'`,
+          sql`${documents.metadata}->>'reportType' = ${reportType}`
+        ));
+      }
+
+      return await query.orderBy(desc(documents.uploadDate)).limit(limit);
+    } catch (error) {
+      console.error('[Storage] Error getting reports by therapist:', error);
+      throw new Error('Failed to get reports by therapist');
+    }
+  }
+
+  async updateReportMetadata(reportId: string, metadata: any, therapistId: string): Promise<Document | undefined> {
+    try {
+      const [updatedReport] = await db
+        .update(documents)
+        .set({
+          metadata,
+          updatedAt: new Date()
+        })
+        .where(and(eq(documents.id, reportId), eq(documents.therapistId, therapistId)))
+        .returning();
+
+      return updatedReport;
+    } catch (error) {
+      console.error('[Storage] Error updating report metadata:', error);
+      throw new Error('Failed to update report metadata');
+    }
+  }
+
+  // Batch operations for AI processing
+  async getClientIdsForBatchProcessing(
+    therapistId: string, 
+    options: { 
+      hasUnprocessedDocuments?: boolean; 
+      needsInsightsUpdate?: boolean;
+      limit?: number;
+    } = {}
+  ): Promise<string[]> {
+    try {
+      const limit = options.limit || 50;
+      
+      if (options.hasUnprocessedDocuments) {
+        // Get clients with unprocessed documents
+        const clientsWithUnprocessedDocs = await db
+          .selectDistinct({ clientId: documents.clientId })
+          .from(documents)
+          .where(and(
+            eq(documents.therapistId, therapistId),
+            eq(documents.isProcessed, false),
+            sql`${documents.clientId} IS NOT NULL`
+          ))
+          .limit(limit);
+        
+        return clientsWithUnprocessedDocs.map(c => c.clientId!);
+      }
+      
+      if (options.needsInsightsUpdate) {
+        // Get clients whose insights are older than 24 hours or don't exist
+        const clientsNeedingUpdate = await db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(and(
+            eq(clients.therapistId, therapistId),
+            or(
+              isNull(clients.aiTags),
+              sql`${clients.updatedAt} < NOW() - INTERVAL '24 hours'`
+            )
+          ))
+          .limit(limit);
+        
+        return clientsNeedingUpdate.map(c => c.id);
+      }
+      
+      // Default: get all clients
+      const allClients = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.therapistId, therapistId))
+        .limit(limit);
+      
+      return allClients.map(c => c.id);
+    } catch (error) {
+      console.error('[Storage] Error getting client IDs for batch processing:', error);
+      throw new Error('Failed to get client IDs for batch processing');
+    }
+  }
+
+  async getDocumentIdsForAssessmentExtraction(
+    therapistId: string, 
+    options: {
+      clientId?: string;
+      unprocessedOnly?: boolean;
+      hasAssessmentContent?: boolean;
+      limit?: number;
+    } = {}
+  ): Promise<string[]> {
+    try {
+      const limit = options.limit || 100;
+      let query = db.select({ id: documents.id }).from(documents);
+      
+      const conditions = [eq(documents.therapistId, therapistId)];
+      
+      if (options.clientId) {
+        conditions.push(eq(documents.clientId, options.clientId));
+      }
+      
+      if (options.unprocessedOnly) {
+        conditions.push(eq(documents.isProcessed, false));
+      }
+      
+      if (options.hasAssessmentContent) {
+        // Look for documents that likely contain assessment content
+        conditions.push(or(
+          sql`LOWER(${documents.fileName}) LIKE '%phq%'`,
+          sql`LOWER(${documents.fileName}) LIKE '%gad%'`,
+          sql`LOWER(${documents.fileName}) LIKE '%assessment%'`,
+          sql`LOWER(${documents.content}) LIKE '%phq-9%'`,
+          sql`LOWER(${documents.content}) LIKE '%gad-7%'`,
+          sql`LOWER(${documents.content}) LIKE '%beck%'`,
+          sql`LOWER(${documents.content}) LIKE '%score%'`
+        ));
+      }
+      
+      const documentIds = await query
+        .where(and(...conditions))
+        .orderBy(desc(documents.uploadDate))
+        .limit(limit);
+      
+      return documentIds.map(d => d.id);
+    } catch (error) {
+      console.error('[Storage] Error getting document IDs for assessment extraction:', error);
+      throw new Error('Failed to get document IDs for assessment extraction');
+    }
+  }
+
+  async markDocumentAsProcessedForAssessments(documentId: string, therapistId: string): Promise<void> {
+    try {
+      await db
+        .update(documents)
+        .set({
+          isProcessed: true,
+          updatedAt: new Date()
+        })
+        .where(and(eq(documents.id, documentId), eq(documents.therapistId, therapistId)));
+    } catch (error) {
+      console.error('[Storage] Error marking document as processed for assessments:', error);
+      throw new Error('Failed to mark document as processed for assessments');
+    }
+  }
+
+  // Analytics and dashboard methods
+  async getAssessmentStatistics(
+    therapistId: string, 
+    timeRange?: { start: Date; end: Date }
+  ): Promise<{
+    totalAssessments: number;
+    assessmentsByType: Record<string, number>;
+    averageScores: Record<string, number>;
+    trendsAnalysis: any;
+  }> {
+    try {
+      let query = db.select().from(assessments).where(eq(assessments.therapistId, therapistId));
+      
+      if (timeRange) {
+        query = query.where(and(
+          eq(assessments.therapistId, therapistId),
+          gte(assessments.assessmentDate, timeRange.start),
+          lte(assessments.assessmentDate, timeRange.end)
+        ));
+      }
+      
+      const assessmentData = await query.orderBy(assessments.assessmentDate);
+      
+      // Calculate statistics
+      const totalAssessments = assessmentData.length;
+      const assessmentsByType: Record<string, number> = {};
+      const scoresByType: Record<string, number[]> = {};
+      
+      assessmentData.forEach(assessment => {
+        const type = assessment.assessmentType;
+        assessmentsByType[type] = (assessmentsByType[type] || 0) + 1;
+        
+        // Extract total score for averaging
+        if (assessment.scores && typeof assessment.scores === 'object') {
+          const score = (assessment.scores as any).totalScore;
+          if (typeof score === 'number') {
+            if (!scoresByType[type]) scoresByType[type] = [];
+            scoresByType[type].push(score);
+          }
+        }
+      });
+      
+      // Calculate average scores
+      const averageScores: Record<string, number> = {};
+      Object.entries(scoresByType).forEach(([type, scores]) => {
+        averageScores[type] = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+      });
+      
+      // Simple trends analysis
+      const trendsAnalysis = this.calculateAssessmentTrends(assessmentData);
+      
+      return {
+        totalAssessments,
+        assessmentsByType,
+        averageScores,
+        trendsAnalysis
+      };
+    } catch (error) {
+      console.error('[Storage] Error getting assessment statistics:', error);
+      throw new Error('Failed to get assessment statistics');
+    }
+  }
+
+  async getClientRiskSummary(therapistId: string): Promise<{
+    clientId: string;
+    clientName: string;
+    riskLevel: string;
+    latestAssessment: any;
+  }[]> {
+    try {
+      // Get all clients with their latest assessments
+      const clientsWithAssessments = await db
+        .select({
+          clientId: clients.id,
+          clientName: sql<string>`${clients.firstName} || ' ' || ${clients.lastName}`,
+          assessmentType: assessments.assessmentType,
+          assessmentDate: assessments.assessmentDate,
+          scores: assessments.scores,
+          interpretation: assessments.interpretation
+        })
+        .from(clients)
+        .leftJoin(assessments, eq(clients.id, assessments.clientId))
+        .where(eq(clients.therapistId, therapistId))
+        .orderBy(desc(assessments.assessmentDate));
+      
+      // Group by client and get latest assessment for each
+      const clientRiskMap = new Map();
+      
+      clientsWithAssessments.forEach(row => {
+        if (!clientRiskMap.has(row.clientId)) {
+          let riskLevel = "low";
+          
+          if (row.scores && typeof row.scores === 'object') {
+            const score = (row.scores as any).totalScore;
+            
+            // Determine risk level based on assessment type and score
+            if (row.assessmentType === "PHQ-9" && typeof score === 'number') {
+              if (score >= 20) riskLevel = "critical";
+              else if (score >= 15) riskLevel = "high";
+              else if (score >= 10) riskLevel = "moderate";
+            } else if (row.assessmentType === "GAD-7" && typeof score === 'number') {
+              if (score >= 15) riskLevel = "high";
+              else if (score >= 10) riskLevel = "moderate";
+            }
+          }
+          
+          clientRiskMap.set(row.clientId, {
+            clientId: row.clientId,
+            clientName: row.clientName,
+            riskLevel,
+            latestAssessment: row.assessmentType ? {
+              type: row.assessmentType,
+              date: row.assessmentDate,
+              scores: row.scores,
+              interpretation: row.interpretation
+            } : null
+          });
+        }
+      });
+      
+      return Array.from(clientRiskMap.values());
+    } catch (error) {
+      console.error('[Storage] Error getting client risk summary:', error);
+      throw new Error('Failed to get client risk summary');
+    }
+  }
+
+  async getInsightsGenerationQueue(therapistId: string): Promise<{
+    clientId: string;
+    priority: string;
+    lastUpdate: Date | null;
+  }[]> {
+    try {
+      const clientsQueue = await db
+        .select({
+          clientId: clients.id,
+          lastUpdate: clients.updatedAt,
+          hasRecentDocuments: sql<boolean>`EXISTS(
+            SELECT 1 FROM ${documents} 
+            WHERE ${documents.clientId} = ${clients.id} 
+            AND ${documents.uploadDate} > NOW() - INTERVAL '7 days'
+          )`,
+          hasRecentSessions: sql<boolean>`EXISTS(
+            SELECT 1 FROM ${sessions} 
+            WHERE ${sessions.clientId} = ${clients.id} 
+            AND ${sessions.sessionDate} > NOW() - INTERVAL '7 days'
+          )`,
+          hasRecentAssessments: sql<boolean>`EXISTS(
+            SELECT 1 FROM ${assessments} 
+            WHERE ${assessments.clientId} = ${clients.id} 
+            AND ${assessments.assessmentDate} > NOW() - INTERVAL '7 days'
+          )`
+        })
+        .from(clients)
+        .where(eq(clients.therapistId, therapistId));
+      
+      // Determine priority based on recency and activity
+      return clientsQueue.map(client => {
+        let priority = "low";
+        
+        if (client.hasRecentAssessments) priority = "high";
+        else if (client.hasRecentDocuments || client.hasRecentSessions) priority = "medium";
+        
+        // Increase priority if insights are old
+        const daysSinceUpdate = client.lastUpdate ? 
+          (Date.now() - client.lastUpdate.getTime()) / (1000 * 60 * 60 * 24) : 999;
+        
+        if (daysSinceUpdate > 7) {
+          priority = priority === "low" ? "medium" : "high";
+        }
+        
+        return {
+          clientId: client.clientId,
+          priority,
+          lastUpdate: client.lastUpdate
+        };
+      }).sort((a, b) => {
+        const priorityOrder = { "high": 3, "medium": 2, "low": 1 };
+        return priorityOrder[b.priority as keyof typeof priorityOrder] - priorityOrder[a.priority as keyof typeof priorityOrder];
+      });
+    } catch (error) {
+      console.error('[Storage] Error getting insights generation queue:', error);
+      throw new Error('Failed to get insights generation queue');
+    }
+  }
+
+  // Helper method for trends analysis
+  private calculateAssessmentTrends(assessmentData: Assessment[]): any {
+    const trends: Record<string, any> = {};
+    
+    // Group by assessment type
+    const byType = assessmentData.reduce((acc, assessment) => {
+      const type = assessment.assessmentType;
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(assessment);
+      return acc;
+    }, {} as Record<string, Assessment[]>);
+    
+    // Calculate trends for each type
+    Object.entries(byType).forEach(([type, assessments]) => {
+      const sorted = assessments.sort((a, b) => 
+        new Date(a.assessmentDate).getTime() - new Date(b.assessmentDate).getTime()
+      );
+      
+      if (sorted.length >= 2) {
+        const scores = sorted.map(a => {
+          const score = (a.scores as any)?.totalScore;
+          return typeof score === 'number' ? score : 0;
+        });
+        
+        const firstScore = scores[0];
+        const lastScore = scores[scores.length - 1];
+        const change = lastScore - firstScore;
+        const changePercent = firstScore !== 0 ? (change / firstScore) * 100 : 0;
+        
+        trends[type] = {
+          totalAssessments: sorted.length,
+          firstScore,
+          lastScore,
+          change,
+          changePercent,
+          trend: change > 0 ? 'worsening' : change < 0 ? 'improving' : 'stable',
+          timeSpan: {
+            start: sorted[0].assessmentDate,
+            end: sorted[sorted.length - 1].assessmentDate
+          }
+        };
+      }
+    });
+    
+    return trends;
   }
 }
 
