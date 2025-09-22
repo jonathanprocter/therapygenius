@@ -7,8 +7,8 @@ import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } f
 import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema } from "@shared/schema";
 import { z } from "zod";
 
-// Hardcoded therapist ID for single-therapist practice (no authentication)
-const THERAPIST_ID = "550e8400-e29b-41d4-a716-446655440000";
+// Dr. Jonathan Procter's therapist ID for single-therapist practice (no authentication)
+const THERAPIST_ID = "a5e0e292-bb99-4cbe-80c1-fac620ecb8bc";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
