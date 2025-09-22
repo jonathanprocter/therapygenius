@@ -153,10 +153,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ message: "Server configuration error" });
       }
       
-      if (practicePassword.length < 12) {
-        console.error('[SECURITY] PRACTICE_PASSWORD is too weak (minimum 12 characters required)');
-        return res.status(500).json({ message: "Server configuration error" });
-      }
       
       if (password !== practicePassword) {
         return res.status(401).json({ message: "Invalid password" });
