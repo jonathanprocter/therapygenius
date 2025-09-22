@@ -8,7 +8,7 @@ import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insert
 import { z } from "zod";
 
 // Dr. Jonathan Procter's therapist ID for single-therapist practice (no authentication)
-const THERAPIST_ID = "a5e0e292-bb99-4cbe-80c1-fac620ecb8bc";
+const THERAPIST_ID = "59ea3867-0b4f-47b6-8a95-6484c4a52ef7";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
