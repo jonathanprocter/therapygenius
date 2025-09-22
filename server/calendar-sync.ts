@@ -81,7 +81,8 @@ class CalendarSyncService {
       process.env.GOOGLE_REDIRECT_URI || 'https://e09c5ae1-e9b9-4ca1-ae8a-f0fe92f01d15-00-jenms9tgg513.worf.replit.dev/api/calendar/callback'
     ) as any;
 
-    this.calendar = google.calendar('v3');
+    // Initialize calendar with auth - this will be properly set when tokens are loaded
+    this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
   }
 
   /**
@@ -457,7 +458,7 @@ class CalendarSyncService {
     let nextSyncToken: string | undefined;
 
     try {
-      this.calendar.auth = this.oauth2Client;
+      // Auth is already set in constructor and updated when tokens are loaded
       
       for (const calendarId of calendarIds) {
         try {

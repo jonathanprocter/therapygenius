@@ -18,7 +18,7 @@ const documentAnalysisSchema = z.object({
   }),
   clientMatch: z.object({
     confidence: z.number(),
-    suggestedClientId: z.string().optional(),
+    suggestedClientId: z.string().nullable().optional(),
     reasoning: z.string()
   }).optional(),
   summary: z.string(),
