@@ -138,7 +138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Simple password-only login for single-therapist practice
-  app.post("/api/auth/simple-login", validateCSRF, async (req, res) => {
+  app.post("/api/auth/simple-login", async (req, res) => {
     try {
       const { password } = req.body;
       
