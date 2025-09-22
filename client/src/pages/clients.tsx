@@ -566,8 +566,8 @@ function ClientCard({ client, viewMode }: { client: Client; viewMode: string }) 
 export default function Clients() {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("name-asc");
-  const [insuranceFilter, setInsuranceFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [insuranceFilter, setInsuranceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem("clientListView") || "grid";
   });
@@ -609,10 +609,10 @@ export default function Clients() {
       );
       
       // Insurance filter
-      const matchesInsurance = !insuranceFilter || insurance?.provider === insuranceFilter;
+      const matchesInsurance = insuranceFilter === "all" || insurance?.provider === insuranceFilter;
       
       // Status filter (active = has sessions in last 6 months)
-      const matchesStatus = !statusFilter || (
+      const matchesStatus = statusFilter === "all" || (
         statusFilter === "active" ? true : false // Simplified for now
       );
       
@@ -622,8 +622,8 @@ export default function Clients() {
     // Update active filters
     const filters: string[] = [];
     if (searchTerm) filters.push(`Search: "${searchTerm}"`);
-    if (insuranceFilter) filters.push(`Insurance: ${insuranceFilter}`);
-    if (statusFilter) filters.push(`Status: ${statusFilter}`);
+    if (insuranceFilter && insuranceFilter !== "all") filters.push(`Insurance: ${insuranceFilter}`);
+    if (statusFilter && statusFilter !== "all") filters.push(`Status: ${statusFilter}`);
     setActiveFilters(filters);
     
     // Sorting
@@ -726,7 +726,7 @@ export default function Clients() {
                   <SelectValue placeholder="Insurance Provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Providers</SelectItem>
+                  <SelectItem value="all">All Providers</SelectItem>
                   {insuranceProviders.map(provider => (
                     <SelectItem key={provider} value={provider}>{provider}</SelectItem>
                   ))}
@@ -738,7 +738,7 @@ export default function Clients() {
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Status</SelectItem>
+                  <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="inactive">Inactive</SelectItem>
                 </SelectContent>
