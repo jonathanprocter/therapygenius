@@ -75,7 +75,7 @@ class CalendarSyncService {
     this.oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/calendar/callback'
+      process.env.GOOGLE_REDIRECT_URI || 'https://e09c5ae1-e9b9-4ca1-ae8a-f0fe92f01d15-00-jenms9tgg513.worf.replit.dev/api/calendar/callback'
     ) as any;
 
     this.calendar = google.calendar('v3');
