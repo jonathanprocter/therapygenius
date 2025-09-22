@@ -123,6 +123,19 @@ export function useDashboardStats() {
   });
 }
 
+export function useTodaysSessions() {
+  return useQuery<Array<Session & { clientName: string }>>({
+    queryKey: ["/api/sessions", "today"],
+    queryFn: async () => {
+      const response = await fetch("/api/sessions/today");
+      if (!response.ok) {
+        throw new Error("Failed to fetch today's sessions");
+      }
+      return response.json();
+    },
+  });
+}
+
 export function useCaseConceptualization(clientId: string) {
   const { toast } = useToast();
 

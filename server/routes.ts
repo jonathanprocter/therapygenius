@@ -138,8 +138,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No files uploaded" });
       }
 
-      // Pre-validate image uploads when HIPAA AI is disabled
+      // Check HIPAA compliance status and provide detailed feedback
       const isHIPAACompliant = process.env.HIPAA_SAFE_AI === 'true';
+      const processingCapabilities = {
+        aiAnalysisEnabled: isHIPAACompliant,
+        imageProcessingEnabled: isHIPAACompliant,
+        supportedFileTypes: [".pdf", ".docx", ".doc", ".txt"],
+        enhancedFileTypes: isHIPAACompliant ? [".pdf", ".docx", ".doc", ".txt", ".png", ".jpg", ".jpeg"] : [".pdf", ".docx", ".doc", ".txt"],
+        processingMode: isHIPAACompliant ? "AI-Enhanced Analysis" : "Deterministic Analysis",
+        autoLinkingCapability: isHIPAACompliant ? "Advanced AI Matching" : "Basic Heuristic Matching"
+      };
+
+      // Pre-validate image uploads when HIPAA AI is disabled
       if (!isHIPAACompliant) {
         const imageFiles = files.filter(file => {
           const mimeType = getFileMimeType(file.originalname);
@@ -152,7 +162,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(422).json({ 
             message: "Image uploads are not supported when HIPAA-safe AI is disabled. Please enable HIPAA_SAFE_AI=true to process image documents, or convert your images to text format.",
             rejectedFiles: imageFileNames,
-            code: "HIPAA_IMAGE_UPLOAD_BLOCKED"
+            code: "HIPAA_IMAGE_UPLOAD_BLOCKED",
+            processingCapabilities,
+            supportedAlternatives: [
+              "Convert images to PDF using a PDF scanner app",
+              "Manually transcribe image content to a text (.txt) file",
+              "Use optical character recognition (OCR) software to extract text before uploading"
+            ]
           });
         }
       }
@@ -259,15 +275,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hasErrors = results.some(r => r.status === "error");
       const hasFailed = results.some(r => r.status === "failed");
       
+      // Include processing capabilities and HIPAA status in response
+      const responsePayload = {
+        results,
+        processingCapabilities,
+        processingInfo: {
+          hipaaCompliant: isHIPAACompliant,
+          totalFilesProcessed: results.length,
+          successfulUploads: results.filter(r => r.status === "success").length,
+          failedProcessing: results.filter(r => r.status === "failed").length,
+          errors: results.filter(r => r.status === "error").length,
+          analysisType: isHIPAACompliant ? "AI-Enhanced" : "Deterministic",
+          autoLinkingPerformed: results.filter(r => r.autoLinkingResult?.sessionMatch).length,
+          potentialMatchesFound: results.reduce((sum, r) => sum + (r.autoLinkingResult?.potentialMatches?.length || 0), 0)
+        },
+        ...(isHIPAACompliant ? {} : {
+          notice: "HIPAA-safe AI is disabled. Documents processed using deterministic analysis with basic categorization and heuristic-based session matching. Enable HIPAA_SAFE_AI=true for enhanced AI analysis and auto-categorization."
+        })
+      };
+      
       if (hasErrors && results.length === 1) {
         // Single file with creation error - return 400
-        res.status(400).json({ results });
+        res.status(400).json(responsePayload);
       } else if (hasFailed || hasErrors) {
         // Some files failed processing - return 207 (Multi-Status)
-        res.status(207).json({ results });
+        res.status(207).json(responsePayload);
       } else {
         // All successful - return 200
-        res.json({ results });
+        res.json(responsePayload);
       }
     } catch (error) {
       console.error("Error uploading documents:", error);
@@ -536,6 +571,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching sessions:", error);
       res.status(500).json({ message: "Failed to fetch sessions" });
+    }
+  });
+
+  // GET /api/sessions/today - Get today's sessions (must come before :id route)
+  app.get("/api/sessions/today", async (req: Request, res) => {
+    try {
+      const todaysSessions = await storage.getTodaysSessions(THERAPIST_ID);
+      res.json(todaysSessions);
+    } catch (error) {
+      console.error("Error fetching today's sessions:", error);
+      res.status(500).json({ message: "Failed to fetch today's sessions" });
     }
   });
 

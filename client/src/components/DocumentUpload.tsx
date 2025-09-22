@@ -100,14 +100,14 @@ export function DocumentUpload({ isOpen, onClose, defaultClientId }: DocumentUpl
             <i className="fas fa-cloud-upload-alt text-4xl text-muted-foreground mb-4"></i>
             <p className="text-lg font-medium mb-2">Drop files here or click to browse</p>
             <p className="text-sm text-muted-foreground mb-4">
-              Supports PDF, DOCX, DOC, TXT, PNG, JPG (max 50MB)
+              Supports PDF, DOCX, DOC, TXT{import.meta.env.VITE_HIPAA_SAFE_AI === 'true' ? ', PNG, JPG' : ''} (max 50MB)
             </p>
             
             <input
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg"
+              accept={import.meta.env.VITE_HIPAA_SAFE_AI === 'true' ? ".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg" : ".pdf,.docx,.doc,.txt"}
               className="hidden"
               onChange={(e) => handleFileSelect(e.target.files)}
               data-testid="file-input"
@@ -131,6 +131,25 @@ export function DocumentUpload({ isOpen, onClose, defaultClientId }: DocumentUpl
             </div>
           )}
           
+          {/* HIPAA Processing Information */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <i className="fas fa-info-circle text-blue-600"></i>
+              <h3 className="text-sm font-medium text-blue-900">Document Processing Information</h3>
+            </div>
+            <div className="text-xs text-blue-700 space-y-1">
+              <p><strong>Supported File Types:</strong> PDF, DOCX, DOC, TXT{import.meta.env.VITE_HIPAA_SAFE_AI === 'true' ? ', PNG, JPG' : ''}</p>
+              <p><strong>Processing Mode:</strong> {import.meta.env.VITE_HIPAA_SAFE_AI === 'true' ? 'AI-Enhanced Analysis' : 'Basic Deterministic Analysis'}</p>
+              <p><strong>Auto-linking:</strong> {import.meta.env.VITE_HIPAA_SAFE_AI === 'true' ? 'Advanced AI Matching' : 'Heuristic-based Matching'}</p>
+              {import.meta.env.VITE_HIPAA_SAFE_AI !== 'true' && (
+                <p className="text-orange-700">
+                  <i className="fas fa-exclamation-triangle mr-1"></i>
+                  <strong>Note:</strong> Image uploads (.png, .jpg) are disabled when HIPAA-safe AI is not enabled
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Client Selection */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Associate with Client (optional)</label>
@@ -152,10 +171,16 @@ export function DocumentUpload({ isOpen, onClose, defaultClientId }: DocumentUpl
           {uploadMutation.isPending && (
             <div className="space-y-2" data-testid="upload-progress">
               <div className="flex justify-between text-sm">
-                <span>Uploading files...</span>
-                <span>Processing...</span>
+                <span>Uploading and processing files...</span>
+                <span>{import.meta.env.VITE_HIPAA_SAFE_AI === 'true' ? 'AI Analysis' : 'Basic Analysis'}</span>
               </div>
               <Progress value={undefined} className="w-full" />
+              <p className="text-xs text-muted-foreground">
+                {import.meta.env.VITE_HIPAA_SAFE_AI === 'true' 
+                  ? 'Performing AI-enhanced categorization and auto-linking...' 
+                  : 'Performing basic categorization and heuristic matching...'
+                }
+              </p>
             </div>
           )}
           

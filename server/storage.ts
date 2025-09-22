@@ -56,6 +56,7 @@ export interface IStorage {
   getSessionById(id: string, therapistId: string): Promise<Session | undefined>;
   getSessionsByClient(clientId: string, therapistId: string): Promise<Session[]>;
   getSessionsByTherapist(therapistId: string, limit?: number): Promise<Session[]>;
+  getTodaysSessions(therapistId: string): Promise<Array<Session & { clientName: string }>>;
   createSession(session: InsertSession): Promise<Session>;
   updateSession(id: string, session: Partial<Session>, therapistId: string): Promise<Session | undefined>;
   upsertSessionByExternalId(session: InsertSession & { externalEventId: string }): Promise<Session>;
@@ -335,6 +336,52 @@ export class DatabaseStorage implements IStorage {
       .where(eq(sessions.therapistId, therapistId))
       .orderBy(desc(sessions.sessionDate))
       .limit(limit);
+  }
+
+  async getTodaysSessions(therapistId: string): Promise<Array<Session & { clientName: string }>> {
+    // Get current date in Eastern timezone
+    const easternToday = new Date();
+    const easternOffset = -5; // EST is UTC-5, EDT is UTC-4 (we'll use -5 for simplicity)
+    easternToday.setHours(0, 0, 0, 0);
+    
+    // Create start and end of day in Eastern time
+    const startOfDay = new Date(easternToday);
+    const endOfDay = new Date(easternToday);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const result = await db
+      .select({
+        // Session fields
+        id: sessions.id,
+        clientId: sessions.clientId,
+        therapistId: sessions.therapistId,
+        sessionDate: sessions.sessionDate,
+        duration: sessions.duration,
+        sessionType: sessions.sessionType,
+        notes: sessions.notes,
+        interventionsUsed: sessions.interventionsUsed,
+        homework: sessions.homework,
+        nextSessionPlan: sessions.nextSessionPlan,
+        externalEventId: sessions.externalEventId,
+        sourceCalendar: sessions.sourceCalendar,
+        aiTags: sessions.aiTags,
+        createdAt: sessions.createdAt,
+        updatedAt: sessions.updatedAt,
+        // Client name
+        clientName: sql<string>`CONCAT(${clients.firstName}, ' ', ${clients.lastName})`
+      })
+      .from(sessions)
+      .innerJoin(clients, eq(sessions.clientId, clients.id))
+      .where(
+        and(
+          eq(sessions.therapistId, therapistId),
+          gte(sessions.sessionDate, startOfDay),
+          lte(sessions.sessionDate, endOfDay)
+        )
+      )
+      .orderBy(sessions.sessionDate);
+
+    return result;
   }
 
   async createSession(session: InsertSession): Promise<Session> {

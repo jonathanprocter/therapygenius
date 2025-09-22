@@ -86,15 +86,54 @@ export function useUploadDocuments() {
       if (variables.clientId) {
         queryClient.invalidateQueries({ queryKey: ["/api/documents/client", variables.clientId] });
       }
+
+      // Enhanced success messaging based on processing results
+      const processingInfo = data.processingInfo;
+      const successCount = processingInfo?.successfulUploads || data.results.length;
+      const failedCount = processingInfo?.failedProcessing || 0;
+      const autoLinkedCount = processingInfo?.autoLinkingPerformed || 0;
+      const analysisType = processingInfo?.analysisType || 'Unknown';
+
+      let description = `${successCount} file(s) uploaded successfully`;
+      if (failedCount > 0) {
+        description += `, ${failedCount} failed processing`;
+      }
+      if (autoLinkedCount > 0) {
+        description += `, ${autoLinkedCount} auto-linked to sessions`;
+      }
+      description += ` (${analysisType} analysis)`;
+
       toast({
         title: "Upload Successful",
-        description: `${data.results.length} file(s) uploaded and processing`,
+        description,
       });
+
+      // Show additional notice if HIPAA AI is disabled
+      if (data.notice) {
+        setTimeout(() => {
+          toast({
+            title: "Processing Notice",
+            description: data.notice,
+            variant: "default",
+          });
+        }, 1000);
+      }
     },
     onError: (error) => {
+      // Enhanced error handling for HIPAA-specific errors
+      let title = "Upload Failed";
+      let description = error.message;
+      
+      if (error.message.includes("HIPAA")) {
+        title = "HIPAA Compliance Issue";
+        description = error.message;
+      } else if (error.message.includes("Image uploads")) {
+        title = "Image Upload Restricted";
+      }
+
       toast({
-        title: "Upload Failed",
-        description: error.message,
+        title,
+        description,
         variant: "destructive",
       });
     },

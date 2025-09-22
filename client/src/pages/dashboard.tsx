@@ -2,15 +2,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useDashboardStats, useClients } from "@/hooks/useClientData";
+import { useDashboardStats, useClients, useTodaysSessions } from "@/hooks/useClientData";
 import { useDocuments } from "@/hooks/useDocuments";
 import { Link } from "wouter";
-import { formatDateEastern, formatDateTimeEastern } from "@/lib/utils";
+import { formatDateEastern, formatDateTimeEastern, formatTimeEastern } from "@/lib/utils";
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: clients, isLoading: clientsLoading } = useClients();
   const { data: documents, isLoading: documentsLoading } = useDocuments(5);
+  const { data: todaysSessions, isLoading: sessionsLoading } = useTodaysSessions();
 
   const recentClients = clients?.slice(0, 3) || [];
   const recentDocuments = documents?.slice(0, 3) || [];
@@ -191,20 +192,66 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Today's Schedule Placeholder */}
+        {/* Today's Schedule */}
         <Card>
           <CardHeader>
             <CardTitle>Today's Schedule</CardTitle>
             <p className="text-sm text-muted-foreground">{formatDateEastern(new Date())} (EST/EDT)</p>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-8">
-              <i className="fas fa-calendar-alt text-4xl text-muted-foreground mb-4"></i>
-              <p className="text-muted-foreground">No appointments scheduled</p>
-              <Button variant="outline" className="mt-4" data-testid="view-calendar">
-                View Full Calendar
-              </Button>
-            </div>
+            {sessionsLoading ? (
+              <div className="space-y-4">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
+              </div>
+            ) : !todaysSessions || todaysSessions.length === 0 ? (
+              <div className="text-center py-8">
+                <i className="fas fa-calendar-alt text-4xl text-muted-foreground mb-4"></i>
+                <p className="text-muted-foreground" data-testid="no-sessions-today">No appointments scheduled for today</p>
+                <p className="text-xs text-muted-foreground mt-2">Enjoy your free time!</p>
+              </div>
+            ) : (
+              <div className="space-y-3" data-testid="todays-sessions">
+                {todaysSessions.map((session: any) => (
+                  <div key={session.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors" data-testid={`session-${session.id}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <Link href={`/client-chart/${session.clientId}`}>
+                            <span className="font-medium text-primary hover:underline cursor-pointer" data-testid={`client-link-${session.clientId}`}>
+                              {session.clientName}
+                            </span>
+                          </Link>
+                          {session.sourceCalendar && (
+                            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200" data-testid={`calendar-badge-${session.id}`}>
+                              From Calendar
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-4 text-sm text-muted-foreground">
+                          <div className="flex items-center space-x-1" data-testid={`session-time-${session.id}`}>
+                            <i className="fas fa-clock text-xs"></i>
+                            <span>{formatTimeEastern(session.sessionDate)}</span>
+                          </div>
+                          {session.duration && (
+                            <div className="flex items-center space-x-1" data-testid={`session-duration-${session.id}`}>
+                              <i className="fas fa-hourglass-half text-xs"></i>
+                              <span>{session.duration} min</span>
+                            </div>
+                          )}
+                          {session.sessionType && (
+                            <Badge variant="secondary" className="text-xs" data-testid={`session-type-${session.id}`}>
+                              {session.sessionType}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
