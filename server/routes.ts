@@ -764,6 +764,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       const session = await storage.createSession(sessionData);
+      
+      // Automatic AI Tagging Trigger for new sessions
+      try {
+        if (session.notes && session.notes.trim().length > 0) {
+          // Generate session AI tags asynchronously (don't block response)
+          setImmediate(async () => {
+            try {
+              const { sessionTagger } = await import('./sessionTagger');
+              const sessionTags = await sessionTagger.generateSessionTags(session.id, req.userId!);
+              await storage.updateSessionAITags(session.id, sessionTags, req.userId!);
+              
+              // Update client tags based on new session
+              const { clientTagger } = await import('./clientTagger');
+              await clientTagger.updateClientTagsForNewSession(session.clientId, req.userId!, session.id);
+              
+              console.log(`[AutoTrigger] AI tags generated for new session ${session.id}`);
+            } catch (aiError) {
+              console.error(`[AutoTrigger] Failed to generate AI tags for session ${session.id}:`, aiError);
+            }
+          });
+        }
+      } catch (triggerError) {
+        console.error("Auto-trigger setup failed (non-blocking):", triggerError);
+      }
+      
       res.status(201).json(session);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -771,6 +796,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Error creating session:", error);
       res.status(500).json({ message: "Failed to create session" });
+    }
+  });
+
+  // Session update endpoint with automatic AI tagging triggers
+  app.put("/api/sessions/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { id } = req.params;
+      const sessionData = insertSessionSchema.partial().parse(req.body);
+      
+      const updatedSession = await storage.updateSession(id, sessionData, req.userId!);
+      
+      if (!updatedSession) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      
+      // Automatic AI Tagging Trigger for updated sessions
+      try {
+        if (sessionData.notes !== undefined && updatedSession.notes && updatedSession.notes.trim().length > 0) {
+          // Regenerate session AI tags asynchronously (don't block response)
+          setImmediate(async () => {
+            try {
+              const { sessionTagger } = await import('./sessionTagger');
+              const sessionTags = await sessionTagger.regenerateSessionTags(updatedSession.id, req.userId!);
+              
+              // CRITICAL FIX: Explicit persistence call to ensure tags are saved to database
+              await storage.updateSessionAITags(updatedSession.id, sessionTags, req.userId!);
+              console.log(`[AutoTrigger] [PERSISTENCE] Session AI tags explicitly persisted for session ${updatedSession.id}`);
+              
+              // Update client tags based on session changes
+              const { clientTagger } = await import('./clientTagger');
+              await clientTagger.updateClientTagsForNewSession(updatedSession.clientId, req.userId!, updatedSession.id);
+              
+              console.log(`[AutoTrigger] AI tags regenerated and persisted for updated session ${updatedSession.id}`);
+            } catch (aiError) {
+              console.error(`[AutoTrigger] [CRITICAL] Failed to regenerate and persist AI tags for session ${updatedSession.id}:`, aiError);
+              
+              // Additional error context for debugging
+              console.error(`[AutoTrigger] [CRITICAL] Session ID: ${updatedSession.id}, User ID: ${req.userId}, Error details:`, {
+                message: aiError instanceof Error ? aiError.message : String(aiError),
+                stack: aiError instanceof Error ? aiError.stack : undefined,
+                timestamp: new Date().toISOString()
+              });
+            }
+          });
+        }
+      } catch (triggerError) {
+        console.error("Auto-trigger setup failed (non-blocking):", triggerError);
+      }
+      
+      res.json(updatedSession);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid session data", errors: error.errors });
+      }
+      console.error("Error updating session:", error);
+      res.status(500).json({ message: "Failed to update session" });
     }
   });
 
@@ -949,6 +1030,520 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error cleaning up files:", error);
       res.status(500).json({ message: "Failed to cleanup files" });
+    }
+  });
+
+  // ==========================================
+  // AI TAGGING SYSTEM ENDPOINTS
+  // ==========================================
+
+  // Session AI Tagging Endpoints
+  app.post("/api/sessions/:sessionId/ai-tags/generate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionId } = req.params;
+      const therapistId = req.user.id;
+
+      const tags = await storage.generateSessionAITags(sessionId, therapistId);
+      await storage.updateSessionAITags(sessionId, tags, therapistId);
+
+      res.json({
+        success: true,
+        sessionId,
+        tags,
+        message: "Session AI tags generated successfully"
+      });
+    } catch (error) {
+      console.error("Error generating session AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to generate session AI tags",
+        error: (error as any)?.message 
+      });
+    }
+  });
+
+  app.get("/api/sessions/:sessionId/ai-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionId } = req.params;
+      const therapistId = req.user.id;
+
+      const tags = await storage.getSessionAITags(sessionId, therapistId);
+      
+      res.json({
+        success: true,
+        sessionId,
+        tags,
+        hasAITags: !!tags
+      });
+    } catch (error) {
+      console.error("Error getting session AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to get session AI tags" 
+      });
+    }
+  });
+
+  app.put("/api/sessions/:sessionId/ai-tags", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionId } = req.params;
+      const { tags } = req.body;
+      const therapistId = req.user.id;
+
+      const updatedSession = await storage.updateSessionAITags(sessionId, tags, therapistId);
+      
+      if (!updatedSession) {
+        return res.status(404).json({ 
+          success: false,
+          message: "Session not found" 
+        });
+      }
+
+      res.json({
+        success: true,
+        sessionId,
+        tags: updatedSession.aiTags,
+        message: "Session AI tags updated successfully"
+      });
+    } catch (error) {
+      console.error("Error updating session AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to update session AI tags" 
+      });
+    }
+  });
+
+  app.post("/api/sessions/:sessionId/ai-tags/regenerate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionId } = req.params;
+      const therapistId = req.user.id;
+
+      const { sessionTagger } = await import('./sessionTagger');
+      const tags = await sessionTagger.regenerateSessionTags(sessionId, therapistId);
+
+      res.json({
+        success: true,
+        sessionId,
+        tags,
+        message: "Session AI tags regenerated successfully"
+      });
+    } catch (error) {
+      console.error("Error regenerating session AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to regenerate session AI tags" 
+      });
+    }
+  });
+
+  // Client AI Tagging Endpoints
+  app.post("/api/clients/:clientId/ai-tags/generate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const tags = await storage.generateClientAITags(clientId, therapistId);
+      await storage.updateClientAITags(clientId, tags, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        tags,
+        message: "Client AI tags generated successfully"
+      });
+    } catch (error) {
+      console.error("Error generating client AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to generate client AI tags",
+        error: (error as any)?.message 
+      });
+    }
+  });
+
+  app.get("/api/clients/:clientId/ai-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const tags = await storage.getClientAITags(clientId, therapistId);
+      
+      res.json({
+        success: true,
+        clientId,
+        tags,
+        hasAITags: !!tags
+      });
+    } catch (error) {
+      console.error("Error getting client AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to get client AI tags" 
+      });
+    }
+  });
+
+  app.put("/api/clients/:clientId/ai-tags", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const { tags } = req.body;
+      const therapistId = req.user.id;
+
+      const updatedClient = await storage.updateClientAITags(clientId, tags, therapistId);
+      
+      if (!updatedClient) {
+        return res.status(404).json({ 
+          success: false,
+          message: "Client not found" 
+        });
+      }
+
+      res.json({
+        success: true,
+        clientId,
+        tags: updatedClient.aiTags,
+        message: "Client AI tags updated successfully"
+      });
+    } catch (error) {
+      console.error("Error updating client AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to update client AI tags" 
+      });
+    }
+  });
+
+  app.post("/api/clients/:clientId/ai-tags/regenerate", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const { clientTagger } = await import('./clientTagger');
+      const tags = await clientTagger.regenerateClientTags(clientId, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        tags,
+        message: "Client AI tags regenerated successfully"
+      });
+    } catch (error) {
+      console.error("Error regenerating client AI tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to regenerate client AI tags" 
+      });
+    }
+  });
+
+  // Bulk AI Tagging Operations
+  app.post("/api/ai-tags/bulk/sessions", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionIds } = req.body;
+      const therapistId = req.user.id;
+
+      if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+        return res.status(400).json({ 
+          success: false,
+          message: "sessionIds array is required" 
+        });
+      }
+
+      const results = await storage.bulkGenerateSessionTags(sessionIds, therapistId);
+
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+
+      res.json({
+        success: true,
+        processed: results.length,
+        successCount,
+        failureCount,
+        results,
+        message: `Bulk session tagging completed: ${successCount} successful, ${failureCount} failed`
+      });
+    } catch (error) {
+      console.error("Error in bulk session tagging:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to perform bulk session tagging" 
+      });
+    }
+  });
+
+  app.post("/api/ai-tags/bulk/clients", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientIds } = req.body;
+      const therapistId = req.user.id;
+
+      if (!Array.isArray(clientIds) || clientIds.length === 0) {
+        return res.status(400).json({ 
+          success: false,
+          message: "clientIds array is required" 
+        });
+      }
+
+      const results = await storage.bulkGenerateClientTags(clientIds, therapistId);
+
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+
+      res.json({
+        success: true,
+        processed: results.length,
+        successCount,
+        failureCount,
+        results,
+        message: `Bulk client tagging completed: ${successCount} successful, ${failureCount} failed`
+      });
+    } catch (error) {
+      console.error("Error in bulk client tagging:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to perform bulk client tagging" 
+      });
+    }
+  });
+
+  // Search and Filtering Endpoints
+  app.get("/api/search/sessions-by-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { tags } = req.query;
+      const therapistId = req.user.id;
+
+      if (!tags) {
+        return res.status(400).json({ 
+          success: false,
+          message: "tags parameter is required" 
+        });
+      }
+
+      const tagArray = Array.isArray(tags) ? tags as string[] : [tags as string];
+      const sessions = await storage.searchSessionsByTags(tagArray, therapistId);
+
+      res.json({
+        success: true,
+        tags: tagArray,
+        sessionCount: sessions.length,
+        sessions
+      });
+    } catch (error) {
+      console.error("Error searching sessions by tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to search sessions by tags" 
+      });
+    }
+  });
+
+  app.get("/api/search/clients-by-tags", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { tags } = req.query;
+      const therapistId = req.user.id;
+
+      if (!tags) {
+        return res.status(400).json({ 
+          success: false,
+          message: "tags parameter is required" 
+        });
+      }
+
+      const tagArray = Array.isArray(tags) ? tags as string[] : [tags as string];
+      const clients = await storage.searchClientsByTags(tagArray, therapistId);
+
+      res.json({
+        success: true,
+        tags: tagArray,
+        clientCount: clients.length,
+        clients
+      });
+    } catch (error) {
+      console.error("Error searching clients by tags:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to search clients by tags" 
+      });
+    }
+  });
+
+  // AI Insights and Analytics Endpoints
+  app.get("/api/clients/:clientId/session-trends", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const { startDate, endDate } = req.query;
+      const therapistId = req.user.id;
+
+      let timeRange;
+      if (startDate && endDate) {
+        timeRange = {
+          start: new Date(startDate as string),
+          end: new Date(endDate as string)
+        };
+      }
+
+      const trends = await storage.getSessionTagTrends(clientId, therapistId, timeRange);
+
+      res.json({
+        success: true,
+        clientId,
+        timeRange,
+        trends
+      });
+    } catch (error) {
+      console.error("Error getting session trends:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to get session trends" 
+      });
+    }
+  });
+
+  app.get("/api/clients/:clientId/progress-insights", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const insights = await storage.getClientProgressInsights(clientId, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        insights
+      });
+    } catch (error) {
+      console.error("Error getting client progress insights:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to get client progress insights" 
+      });
+    }
+  });
+
+  app.get("/api/ai-insights/clinical-summary", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const therapistId = req.user.id;
+
+      const summary = await storage.getClinicalInsightsSummary(therapistId);
+
+      res.json({
+        success: true,
+        summary
+      });
+    } catch (error) {
+      console.error("Error getting clinical insights summary:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to get clinical insights summary" 
+      });
+    }
+  });
+
+  app.get("/api/clients/:clientId/comprehensive-report", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const { clientTagger } = await import('./clientTagger');
+      const report = await clientTagger.getClientProgressReport(clientId, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        report
+      });
+    } catch (error) {
+      console.error("Error getting comprehensive client report:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to get comprehensive client report" 
+      });
+    }
+  });
+
+  // Enhanced Case Conceptualization Endpoint
+  app.post("/api/clients/:clientId/case-conceptualization", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const conceptualization = await generateCaseConceptualization(clientId, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        conceptualization,
+        generatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error generating enhanced case conceptualization:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to generate enhanced case conceptualization",
+        error: (error as any)?.message 
+      });
+    }
+  });
+
+  // Session Trend Analysis Endpoint
+  app.get("/api/clients/:clientId/session-analysis", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { clientId } = req.params;
+      const therapistId = req.user.id;
+
+      const { sessionTagger } = await import('./sessionTagger');
+      const analysis = await sessionTagger.analyzeSessionTrends(clientId, therapistId);
+
+      res.json({
+        success: true,
+        clientId,
+        analysis
+      });
+    } catch (error) {
+      console.error("Error analyzing session trends:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to analyze session trends" 
+      });
+    }
+  });
+
+  // Automatic Tag Generation Trigger Endpoint (for when sessions are updated)
+  app.post("/api/sessions/:sessionId/trigger-ai-update", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { sessionId } = req.params;
+      const therapistId = req.user.id;
+
+      // Get session to find client ID
+      const session = await storage.getSessionById(sessionId, therapistId);
+      if (!session) {
+        return res.status(404).json({ 
+          success: false,
+          message: "Session not found" 
+        });
+      }
+
+      // Regenerate session tags
+      const { sessionTagger } = await import('./sessionTagger');
+      const sessionTags = await sessionTagger.regenerateSessionTags(sessionId, therapistId);
+
+      // Update client tags based on new session data
+      const { clientTagger } = await import('./clientTagger');
+      await clientTagger.updateClientTagsForNewSession(session.clientId, therapistId, sessionId);
+
+      res.json({
+        success: true,
+        sessionId,
+        clientId: session.clientId,
+        sessionTags,
+        message: "AI tags updated for session and client"
+      });
+    } catch (error) {
+      console.error("Error triggering AI update:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to trigger AI update" 
+      });
     }
   });
 

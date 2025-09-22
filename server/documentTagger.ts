@@ -486,32 +486,110 @@ export const generateCaseConceptualization = async (
     const treatmentPlans = await storage.getTreatmentPlansByClient(clientId, therapistId);
     const documents = await storage.getDocumentsByClient(clientId, therapistId);
 
+    // Get AI tagging insights
+    const clientTags = await storage.getClientAITags(clientId, therapistId);
+    const sessionTags = sessions
+      .filter(s => s.aiTags)
+      .map(s => ({
+        date: s.sessionDate,
+        tags: s.aiTags,
+        sessionId: s.id
+      }))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // Get session trends analysis
+    const sessionTrends = await storage.getSessionTagTrends(clientId, therapistId);
+
     const conceptualizationPrompt = `
-You are a licensed clinical psychologist providing case conceptualization. Analyze all available data for this client and provide comprehensive clinical insights.
+You are a licensed clinical psychologist providing comprehensive case conceptualization. Analyze all available data including advanced AI tagging insights to provide evidence-based clinical insights.
 
 Client Information:
 Name: ${client.firstName} ${client.lastName}
 DOB: ${client.dateOfBirth}
+Demographics: ${client.sex || 'Unknown'}, ${client.genderIdentity || 'Unknown'}, ${client.race || 'Unknown'}
+Relationship: ${client.relationshipStatus || 'Unknown'}
+Employment: ${client.employment || 'Unknown'}
 
-Recent Sessions (${sessions.length} total):
-${sessions.slice(0, 5).map(s => `Date: ${s.sessionDate}, Notes: ${s.notes?.substring(0, 500) || 'No notes'}`).join('\n')}
+AI-Generated Client Profile Insights:
+${clientTags ? `
+Therapy Trajectory: ${JSON.stringify(clientTags.therapyTrajectory, null, 2)}
+Risk Profile: ${JSON.stringify(clientTags.riskProfile, null, 2)}
+Client Strengths: ${JSON.stringify(clientTags.clientStrengths, null, 2)}
+Treatment Response: ${JSON.stringify(clientTags.treatmentResponse, null, 2)}
+Recurring Themes: ${JSON.stringify(clientTags.recurringThemes, null, 2)}
+Clinical Patterns: ${JSON.stringify(clientTags.clinicalPatterns, null, 2)}
+Engagement Profile: ${JSON.stringify(clientTags.engagementProfile, null, 2)}
+Clinical Recommendations: ${JSON.stringify(clientTags.clinicalRecommendations, null, 2)}
+` : 'No AI client tags available'}
 
-Assessments (${assessments.length} total):
-${assessments.slice(0, 3).map(a => `Type: ${a.assessmentType}, Date: ${a.assessmentDate}, Scores: ${JSON.stringify(a.scores)}`).join('\n')}
+Recent Session AI Analysis (Last ${Math.min(sessionTags.length, 5)} sessions):
+${sessionTags.slice(0, 5).map((st, i) => `
+Session ${i + 1} (${new Date(st.date).toLocaleDateString()}):
+- Themes: ${st.tags.sessionThemes?.join(', ') || 'None'}
+- Client Mood: ${st.tags.clientMood?.primary || 'Unknown'} (${st.tags.clientMood?.intensity || 'unknown'} intensity)
+- Engagement: ${st.tags.clientEngagement?.level || 'Unknown'}
+- Risk Factors: Suicide: ${st.tags.riskFactors?.suicideRisk || 'none'}, Substance: ${st.tags.riskFactors?.substanceUse || 'none'}
+- Progress Markers: ${st.tags.progressMarkers?.improvements?.length || 0} improvements, ${st.tags.progressMarkers?.challenges?.length || 0} challenges
+- Intervention Effectiveness: ${st.tags.interventionEffectiveness?.map(ie => `${ie.intervention}: ${ie.effectiveness}`).join(', ') || 'None assessed'}
+- Session Quality: ${st.tags.sessionQuality || 'Unknown'}
+- Therapeutic Relationship: ${st.tags.therapeuticRelationship || 'Unknown'}
+- Clinical Observations: ${st.tags.clinicalObservations?.join('; ') || 'None'}
+`).join('\n')}
+
+Session Trend Analysis:
+Total Sessions: ${sessions.length}
+Tagged Sessions: ${sessionTrends?.taggedSessions || 0}
+Trend Data Available: ${sessionTrends?.trends ? 'Yes' : 'No'}
+
+Assessment History (${assessments.length} total):
+${assessments.slice(0, 3).map(a => `Type: ${a.assessmentType}, Date: ${new Date(a.assessmentDate).toLocaleDateString()}, Scores: ${JSON.stringify(a.scores)}, Interpretation: ${a.interpretation || 'None'}`).join('\n')}
 
 Treatment Plans (${treatmentPlans.length} total):
-${treatmentPlans.slice(0, 2).map(tp => `Goals: ${JSON.stringify(tp.goals)}, Interventions: ${JSON.stringify(tp.interventions)}`).join('\n')}
+${treatmentPlans.slice(0, 2).map(tp => `Start: ${new Date(tp.startDate).toLocaleDateString()}, Goals: ${JSON.stringify(tp.goals)}, Interventions: ${JSON.stringify(tp.interventions)}`).join('\n')}
 
-Please provide a comprehensive case conceptualization in JSON format:
+Documents: ${documents.length} total documents available for analysis
+
+Please provide a comprehensive, evidence-based case conceptualization in JSON format:
 {
-  "conceptualization": "Detailed clinical case formulation including presenting problems, precipitating factors, predisposing factors, perpetuating factors, and protective factors",
-  "patterns": ["pattern1", "pattern2", "pattern3"],
-  "recommendations": ["recommendation1", "recommendation2", "recommendation3"],
-  "riskFactors": ["risk1", "risk2"],
-  "strengths": ["strength1", "strength2", "strength3"]
+  "conceptualization": "Detailed clinical case formulation integrating AI insights with traditional assessment. Include: presenting problems, precipitating factors, predisposing factors, perpetuating factors, protective factors, and AI-identified patterns. Use the AI tagging data to provide data-driven insights about therapy progress, intervention effectiveness, and client patterns.",
+  "patterns": [
+    "AI-identified recurring themes and patterns from session analysis",
+    "Mood and engagement patterns from session tracking",
+    "Treatment response patterns from intervention effectiveness analysis",
+    "Risk factor patterns and trends over time",
+    "Client strength patterns and therapeutic alliance development"
+  ],
+  "recommendations": [
+    "Evidence-based intervention recommendations based on AI analysis of what works best for this client",
+    "Specific therapeutic approaches recommended based on effectiveness data",
+    "Risk management recommendations based on AI risk assessment",
+    "Goal adjustment recommendations based on progress analysis",
+    "Session frequency and treatment planning recommendations based on engagement and progress patterns"
+  ],
+  "riskFactors": [
+    "Current and ongoing risk factors identified through AI analysis",
+    "Risk patterns and trends from session tracking",
+    "Environmental and situational risk factors"
+  ],
+  "strengths": [
+    "Client strengths identified through AI analysis of session content",
+    "Protective factors and resilience indicators",
+    "Therapeutic alliance strengths and engagement factors",
+    "Coping strategies and resources that have proven effective"
+  ]
 }
 
-Focus on evidence-based insights and practical clinical recommendations.
+ENHANCED ANALYSIS GUIDELINES:
+1. **AI-Informed Assessment**: Integrate AI tagging insights with clinical judgment for comprehensive understanding
+2. **Pattern Recognition**: Use longitudinal AI data to identify therapeutic patterns not visible in individual sessions
+3. **Evidence-Based Recommendations**: Ground recommendations in AI analysis of intervention effectiveness for this specific client
+4. **Risk-Informed Practice**: Use AI risk assessment trends to inform safety planning and clinical decision-making
+5. **Strengths-Based Approach**: Leverage AI identification of client strengths and effective coping strategies
+6. **Treatment Optimization**: Use AI analysis of session quality and engagement to optimize therapeutic approach
+7. **Progress Tracking**: Incorporate AI-identified progress markers and outcome patterns
+8. **Clinical Integration**: Synthesize AI insights with traditional clinical assessment for holistic understanding
+
+Focus on actionable, personalized insights that support effective ongoing treatment based on comprehensive data analysis.
 `;
 
     return await aiRouter.chatJSON(
@@ -523,13 +601,13 @@ Focus on evidence-based insights and practical clinical recommendations.
       ],
       caseConceptualizationSchema,
       {
-        systemPrompt: "You are a licensed clinical psychologist providing evidence-based case conceptualization. Always respond with valid JSON.",
-        maxTokens: 2048
+        systemPrompt: "You are a licensed clinical psychologist providing evidence-based case conceptualization enhanced with AI insights. Always respond with valid JSON that integrates AI tagging data with clinical expertise.",
+        maxTokens: 3000
       }
     );
   } catch (error) {
-    console.error("Error generating case conceptualization:", error);
-    throw new Error(`Case conceptualization failed: ${(error as any)?.message || error}`);
+    console.error("Error generating enhanced case conceptualization:", error);
+    throw new Error(`Enhanced case conceptualization failed: ${(error as any)?.message || error}`);
   }
 };
 

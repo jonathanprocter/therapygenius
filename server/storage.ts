@@ -128,6 +128,27 @@ export interface IStorage {
   }>>;
   unlinkDocumentFromSession(documentId: string, therapistId: string): Promise<Document | undefined>;
   getUnlinkedDocuments(therapistId: string, limit?: number): Promise<Document[]>;
+  
+  // AI Tagging methods for sessions
+  generateSessionAITags(sessionId: string, therapistId: string): Promise<any>;
+  updateSessionAITags(sessionId: string, aiTags: any, therapistId: string): Promise<Session | undefined>;
+  getSessionAITags(sessionId: string, therapistId: string): Promise<any | null>;
+  searchSessionsByTags(tags: string[], therapistId: string): Promise<Session[]>;
+  
+  // AI Tagging methods for clients
+  generateClientAITags(clientId: string, therapistId: string): Promise<any>;
+  updateClientAITags(clientId: string, aiTags: any, therapistId: string): Promise<Client | undefined>;
+  getClientAITags(clientId: string, therapistId: string): Promise<any | null>;
+  searchClientsByTags(tags: string[], therapistId: string): Promise<Client[]>;
+  
+  // Bulk AI tagging operations
+  bulkGenerateSessionTags(sessionIds: string[], therapistId: string): Promise<{ sessionId: string; tags: any; success: boolean }[]>;
+  bulkGenerateClientTags(clientIds: string[], therapistId: string): Promise<{ clientId: string; tags: any; success: boolean }[]>;
+  
+  // AI insights and analytics
+  getSessionTagTrends(clientId: string, therapistId: string, timeRange?: { start: Date; end: Date }): Promise<any>;
+  getClientProgressInsights(clientId: string, therapistId: string): Promise<any>;
+  getClinicalInsightsSummary(therapistId: string): Promise<any>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -858,6 +879,271 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error('[Storage] Error getting unlinked documents:', error);
       throw new Error('Failed to get unlinked documents');
+    }
+  }
+
+  // AI Tagging methods for sessions
+  async generateSessionAITags(sessionId: string, therapistId: string): Promise<any> {
+    const { sessionTagger } = await import('./sessionTagger');
+    return await sessionTagger.generateSessionTags(sessionId, therapistId);
+  }
+
+  async updateSessionAITags(sessionId: string, aiTags: any, therapistId: string): Promise<Session | undefined> {
+    try {
+      const [updatedSession] = await db
+        .update(sessions)
+        .set({
+          aiTags,
+          updatedAt: new Date()
+        })
+        .where(and(eq(sessions.id, sessionId), eq(sessions.therapistId, therapistId)))
+        .returning();
+
+      return updatedSession;
+    } catch (error) {
+      console.error('[Storage] Error updating session AI tags:', error);
+      throw new Error('Failed to update session AI tags');
+    }
+  }
+
+  async getSessionAITags(sessionId: string, therapistId: string): Promise<any | null> {
+    try {
+      const [session] = await db
+        .select({ aiTags: sessions.aiTags })
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.therapistId, therapistId)));
+
+      return session?.aiTags || null;
+    } catch (error) {
+      console.error('[Storage] Error getting session AI tags:', error);
+      throw new Error('Failed to get session AI tags');
+    }
+  }
+
+  async searchSessionsByTags(tags: string[], therapistId: string): Promise<Session[]> {
+    try {
+      // Search for sessions where aiTags contains any of the specified tags
+      const tagConditions = tags.map(tag => 
+        sql`${sessions.aiTags}::text ILIKE ${'%' + tag + '%'}`
+      );
+      
+      return await db
+        .select()
+        .from(sessions)
+        .where(and(
+          eq(sessions.therapistId, therapistId),
+          or(...tagConditions)
+        ))
+        .orderBy(desc(sessions.sessionDate));
+    } catch (error) {
+      console.error('[Storage] Error searching sessions by tags:', error);
+      throw new Error('Failed to search sessions by tags');
+    }
+  }
+
+  // AI Tagging methods for clients
+  async generateClientAITags(clientId: string, therapistId: string): Promise<any> {
+    const { clientTagger } = await import('./clientTagger');
+    return await clientTagger.generateClientTags(clientId, therapistId);
+  }
+
+  async updateClientAITags(clientId: string, aiTags: any, therapistId: string): Promise<Client | undefined> {
+    try {
+      const [updatedClient] = await db
+        .update(clients)
+        .set({
+          aiTags,
+          updatedAt: new Date()
+        })
+        .where(and(eq(clients.id, clientId), eq(clients.therapistId, therapistId)))
+        .returning();
+
+      return updatedClient;
+    } catch (error) {
+      console.error('[Storage] Error updating client AI tags:', error);
+      throw new Error('Failed to update client AI tags');
+    }
+  }
+
+  async getClientAITags(clientId: string, therapistId: string): Promise<any | null> {
+    try {
+      const [client] = await db
+        .select({ aiTags: clients.aiTags })
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.therapistId, therapistId)));
+
+      return client?.aiTags || null;
+    } catch (error) {
+      console.error('[Storage] Error getting client AI tags:', error);
+      throw new Error('Failed to get client AI tags');
+    }
+  }
+
+  async searchClientsByTags(tags: string[], therapistId: string): Promise<Client[]> {
+    try {
+      // Search for clients where aiTags contains any of the specified tags
+      const tagConditions = tags.map(tag => 
+        sql`${clients.aiTags}::text ILIKE ${'%' + tag + '%'}`
+      );
+      
+      return await db
+        .select()
+        .from(clients)
+        .where(and(
+          eq(clients.therapistId, therapistId),
+          or(...tagConditions)
+        ))
+        .orderBy(desc(clients.updatedAt));
+    } catch (error) {
+      console.error('[Storage] Error searching clients by tags:', error);
+      throw new Error('Failed to search clients by tags');
+    }
+  }
+
+  // Bulk AI tagging operations
+  async bulkGenerateSessionTags(sessionIds: string[], therapistId: string): Promise<{ sessionId: string; tags: any; success: boolean }[]> {
+    const { sessionTagger } = await import('./sessionTagger');
+    return await sessionTagger.bulkGenerateSessionTags(sessionIds, therapistId);
+  }
+
+  async bulkGenerateClientTags(clientIds: string[], therapistId: string): Promise<{ clientId: string; tags: any; success: boolean }[]> {
+    const { clientTagger } = await import('./clientTagger');
+    return await clientTagger.bulkGenerateClientTags(clientIds, therapistId);
+  }
+
+  // AI insights and analytics
+  async getSessionTagTrends(clientId: string, therapistId: string, timeRange?: { start: Date; end: Date }): Promise<any> {
+    try {
+      let query = db
+        .select()
+        .from(sessions)
+        .where(and(
+          eq(sessions.clientId, clientId),
+          eq(sessions.therapistId, therapistId)
+        ));
+
+      if (timeRange) {
+        query = query.where(and(
+          eq(sessions.clientId, clientId),
+          eq(sessions.therapistId, therapistId),
+          gte(sessions.sessionDate, timeRange.start),
+          lte(sessions.sessionDate, timeRange.end)
+        ));
+      }
+
+      const sessionData = await query.orderBy(sessions.sessionDate);
+
+      // Analyze trends in AI tags over time
+      const trends = sessionData
+        .filter(session => session.aiTags)
+        .map(session => ({
+          date: session.sessionDate,
+          tags: session.aiTags,
+          sessionId: session.id
+        }));
+
+      return {
+        totalSessions: sessionData.length,
+        taggedSessions: trends.length,
+        trends
+      };
+    } catch (error) {
+      console.error('[Storage] Error getting session tag trends:', error);
+      throw new Error('Failed to get session tag trends');
+    }
+  }
+
+  async getClientProgressInsights(clientId: string, therapistId: string): Promise<any> {
+    try {
+      // Get client with AI tags
+      const client = await this.getClientById(clientId, therapistId);
+      if (!client) {
+        throw new Error('Client not found');
+      }
+
+      // Get all sessions with AI tags
+      const sessions = await db
+        .select()
+        .from(sessions)
+        .where(and(
+          eq(sessions.clientId, clientId),
+          eq(sessions.therapistId, therapistId)
+        ))
+        .orderBy(sessions.sessionDate);
+
+      // Get assessments
+      const assessments = await this.getAssessmentsByClient(clientId, therapistId);
+
+      return {
+        client: {
+          id: client.id,
+          name: `${client.firstName} ${client.lastName}`,
+          aiTags: client.aiTags
+        },
+        sessions: {
+          total: sessions.length,
+          withTags: sessions.filter(s => s.aiTags).length,
+          recent: sessions.slice(-5).map(s => ({
+            id: s.id,
+            date: s.sessionDate,
+            aiTags: s.aiTags
+          }))
+        },
+        assessments: {
+          total: assessments.length,
+          recent: assessments.slice(-3)
+        }
+      };
+    } catch (error) {
+      console.error('[Storage] Error getting client progress insights:', error);
+      throw new Error('Failed to get client progress insights');
+    }
+  }
+
+  async getClinicalInsightsSummary(therapistId: string): Promise<any> {
+    try {
+      // Get summary statistics for AI tagging system
+      const [clientStats] = await db
+        .select({
+          totalClients: sql<number>`count(*)`,
+          taggedClients: sql<number>`count(CASE WHEN ${clients.aiTags} IS NOT NULL THEN 1 END)`
+        })
+        .from(clients)
+        .where(eq(clients.therapistId, therapistId));
+
+      const [sessionStats] = await db
+        .select({
+          totalSessions: sql<number>`count(*)`,
+          taggedSessions: sql<number>`count(CASE WHEN ${sessions.aiTags} IS NOT NULL THEN 1 END)`
+        })
+        .from(sessions)
+        .where(eq(sessions.therapistId, therapistId));
+
+      // Get recent tagged sessions
+      const recentTaggedSessions = await db
+        .select({
+          id: sessions.id,
+          clientId: sessions.clientId,
+          sessionDate: sessions.sessionDate,
+          aiTags: sessions.aiTags
+        })
+        .from(sessions)
+        .where(and(
+          eq(sessions.therapistId, therapistId),
+          sql`${sessions.aiTags} IS NOT NULL`
+        ))
+        .orderBy(desc(sessions.sessionDate))
+        .limit(10);
+
+      return {
+        clients: clientStats,
+        sessions: sessionStats,
+        recentActivity: recentTaggedSessions,
+        generatedAt: new Date()
+      };
+    } catch (error) {
+      console.error('[Storage] Error getting clinical insights summary:', error);
+      throw new Error('Failed to get clinical insights summary');
     }
   }
 }
