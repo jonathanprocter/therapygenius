@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardStats, useClients } from "@/hooks/useClientData";
 import { useDocuments } from "@/hooks/useDocuments";
 import { Link } from "wouter";
+import { formatDateEastern, formatDateTimeEastern } from "@/lib/utils";
 
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
@@ -14,9 +15,8 @@ export default function Dashboard() {
   const recentClients = clients?.slice(0, 3) || [];
   const recentDocuments = documents?.slice(0, 3) || [];
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
-  };
+  // Using Eastern Time formatting utilities for consistent timezone display
+  const formatDate = formatDateEastern;
 
   const getFileIcon = (fileType: string) => {
     if (fileType.includes("pdf")) return "fas fa-file-pdf text-red-600";
@@ -195,7 +195,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>Today's Schedule</CardTitle>
-            <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString()}</p>
+            <p className="text-sm text-muted-foreground">{formatDateEastern(new Date())} (EST/EDT)</p>
           </CardHeader>
           <CardContent>
             <div className="text-center py-8">

@@ -1,37 +1,37 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Client, Session, Assessment, TreatmentPlan } from "@shared/schema";
+import type { Client, Session, Assessment, TreatmentPlan, DashboardStats } from "@shared/schema";
 
 export function useClients() {
-  return useQuery({
+  return useQuery<Client[]>({
     queryKey: ["/api/clients"],
   });
 }
 
 export function useClient(clientId: string) {
-  return useQuery({
+  return useQuery<Client>({
     queryKey: ["/api/clients", clientId],
     enabled: !!clientId,
   });
 }
 
 export function useClientSessions(clientId: string) {
-  return useQuery({
+  return useQuery<Session[]>({
     queryKey: ["/api/sessions/client", clientId],
     enabled: !!clientId,
   });
 }
 
 export function useClientAssessments(clientId: string) {
-  return useQuery({
+  return useQuery<Assessment[]>({
     queryKey: ["/api/assessments/client", clientId],
     enabled: !!clientId,
   });
 }
 
 export function useClientTreatmentPlans(clientId: string) {
-  return useQuery({
+  return useQuery<TreatmentPlan[]>({
     queryKey: ["/api/treatment-plans/client", clientId],
     enabled: !!clientId,
   });
@@ -118,7 +118,7 @@ export function useCreateSession() {
 }
 
 export function useDashboardStats() {
-  return useQuery({
+  return useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
   });
 }

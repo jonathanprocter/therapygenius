@@ -4,13 +4,13 @@ import { useToast } from "@/hooks/use-toast";
 import type { Document } from "@shared/schema";
 
 export function useDocuments(limit?: number) {
-  return useQuery({
+  return useQuery<Document[]>({
     queryKey: limit ? [`/api/documents?limit=${limit}`] : ["/api/documents"],
   });
 }
 
 export function useClientDocuments(clientId: string) {
-  return useQuery({
+  return useQuery<Document[]>({
     queryKey: ["/api/documents/client", clientId],
     enabled: !!clientId,
   });

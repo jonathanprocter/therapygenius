@@ -300,3 +300,14 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 
 export type RateLimitCounter = typeof rateLimitCounters.$inferSelect;
 export type InsertRateLimitCounter = z.infer<typeof insertRateLimitCounterSchema>;
+
+// Dashboard stats interface
+export interface DashboardStats {
+  activeClients: string | number;
+  weekSessions: string | number;
+  documentsProcessed: string | number;
+  completedGoals: {
+    completed: number;
+    total: number;
+  } | null;
+}

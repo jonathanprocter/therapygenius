@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import type { Client, Assessment } from "@shared/schema";
+import { formatDateEastern, calculateAgeEastern } from "@/lib/utils";
 
 interface ClientProfileProps {
   client: Client;
@@ -10,17 +11,8 @@ interface ClientProfileProps {
 }
 
 export function ClientProfile({ client, recentAssessments = [], className }: ClientProfileProps) {
-  const calculateAge = (dateOfBirth: string | Date | null) => {
-    if (!dateOfBirth) return null;
-    const birth = new Date(dateOfBirth);
-    const today = new Date();
-    let age = today.getFullYear() - birth.getFullYear();
-    const monthDiff = today.getMonth() - birth.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-      age--;
-    }
-    return age;
-  };
+  // Using Eastern Time utilities for consistent timezone calculations
+  const calculateAge = calculateAgeEastern;
 
   const getLatestScore = (assessmentType: string) => {
     const assessment = recentAssessments
@@ -68,7 +60,7 @@ export function ClientProfile({ client, recentAssessments = [], className }: Cli
                 {age && <span>Age {age}</span>}
                 {client.dateOfBirth && (
                   <span className="ml-2 text-xs">
-                    DOB: {new Date(client.dateOfBirth).toLocaleDateString()}
+                    DOB: {formatDateEastern(client.dateOfBirth)} (EST/EDT)
                   </span>
                 )}
               </p>

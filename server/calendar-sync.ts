@@ -63,8 +63,9 @@ class CalendarSyncService {
   private calendar: any;
   private readonly SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
   // Configuration from environment variables for security and flexibility
-  private readonly DATE_RANGE_START = process.env.CALENDAR_SYNC_START_DATE || '2015-01-01T00:00:00Z';
-  private readonly DATE_RANGE_END = process.env.CALENDAR_SYNC_END_DATE || '2030-12-31T23:59:59Z';
+  // Updated to use Eastern Time (EST/EDT) - America/New_York handles DST transitions automatically
+  private readonly DATE_RANGE_START = process.env.CALENDAR_SYNC_START_DATE || '2015-01-01T00:00:00-05:00';
+  private readonly DATE_RANGE_END = process.env.CALENDAR_SYNC_END_DATE || '2030-12-31T23:59:59-05:00';
   private readonly MAX_EVENTS_PER_SYNC = parseInt(process.env.MAX_EVENTS_PER_SYNC || '1000');
   private readonly SYNC_RATE_LIMIT_MS = parseInt(process.env.SYNC_RATE_LIMIT_MS || '100');
   private readonly QUOTA_LIMIT_PER_DAY = parseInt(process.env.GOOGLE_CALENDAR_QUOTA_LIMIT || '1000000');

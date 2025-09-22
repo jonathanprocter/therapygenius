@@ -2,6 +2,10 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+// Set timezone to Eastern Time BEFORE any other imports or operations
+// This ensures all Date operations throughout the application use EST/EDT
+process.env.TZ = 'America/New_York';
+
 // Now import other modules after environment is loaded
 import express, { type Request, Response, NextFunction } from "express";
 

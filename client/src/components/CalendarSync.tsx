@@ -20,6 +20,7 @@ import {
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
+import { formatDateTimeEastern } from '@/lib/utils';
 
 interface CalendarSyncStatus {
   isAuthenticated: boolean;
@@ -151,9 +152,10 @@ export function CalendarSync({ className, showFullDashboard = false }: CalendarS
     syncType: 'full'
   };
 
+  // Using Eastern Time formatting for consistent timezone display
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Never';
-    return new Date(dateString).toLocaleString();
+    return formatDateTimeEastern(dateString);
   };
 
   const getStatusColor = () => {
@@ -275,7 +277,7 @@ export function CalendarSync({ className, showFullDashboard = false }: CalendarS
             <AlertDescription>
               <div className="space-y-3">
                 <p className="text-blue-800">
-                  Click the button below to authenticate with Google Calendar (jonathan.procter@gmail.com, 2015-2030):
+                  Click the button below to authenticate with Google Calendar (jonathan.procter@gmail.com, 2015-2030 EST/EDT):
                 </p>
                 <Button onClick={handleAuthClick} className="w-full" data-testid="auth-button">
                   <ExternalLink className="w-4 h-4 mr-2" />
