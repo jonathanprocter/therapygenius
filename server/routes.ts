@@ -582,8 +582,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           potentialSessions.push({
             id: session.id,
             sessionDate: session.sessionDate,
-            notes: session.notes,
-            sessionType: session.sessionType
+            notes: session.notes || undefined,
+            sessionType: session.sessionType || undefined
           });
         }
       }
