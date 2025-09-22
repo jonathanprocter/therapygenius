@@ -94,7 +94,7 @@ export function Sidebar() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate" data-testid="user-name">
-              Dr. Smith
+              Dr. Jonathan Procter
             </p>
             <p className="text-xs text-muted-foreground truncate">Licensed Therapist</p>
           </div>
