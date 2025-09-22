@@ -314,7 +314,7 @@ class CalendarSyncService {
 
       // Fetch events with pagination and rate limiting
       const { events: allEvents, nextSyncToken, quotaInfo } = await this.fetchCalendarEventsWithPagination(
-        ['primary', 'simplepractice'], 
+        ['primary', '6ac7ac649a345a77fa617a926a67b4e1028f6a8ade0bdf1e7cca8f2b62310423@group.calendar.google.com'], 
         syncType, 
         syncToken,
         therapistId
@@ -835,7 +835,7 @@ If no confident match found, respond with: {"match": false}
         50; // Default 50 minutes
 
       const calendarSource = (event as any)._calendarSource || 
-        (event.id?.includes('simplepractice') ? 'simplepractice' : 'primary');
+        (event.id?.includes('6ac7ac649a345a77fa617a926a67b4e1028f6a8ade0bdf1e7cca8f2b62310423') ? 'simplepractice' : 'primary');
 
       // Handle cancelled events
       if (event.status === 'cancelled') {
