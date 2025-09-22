@@ -2,7 +2,31 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+// SECURITY: Enforce strong JWT secret at startup - no fallback allowed
+const JWT_SECRET = (() => {
+  const secret = process.env.JWT_SECRET;
+  
+  if (!secret) {
+    console.error('[SECURITY FATAL] JWT_SECRET environment variable is required but not set');
+    console.error('[SECURITY FATAL] Server cannot start without a secure JWT signing key');
+    process.exit(1);
+  }
+  
+  if (secret.length < 32) {
+    console.error('[SECURITY FATAL] JWT_SECRET must be at least 32 characters long for security');
+    console.error(`[SECURITY FATAL] Current length: ${secret.length}, minimum required: 32`);
+    process.exit(1);
+  }
+  
+  if (secret === "your-secret-key" || secret === "development" || secret === "test") {
+    console.error('[SECURITY FATAL] JWT_SECRET cannot use default/common values');
+    console.error('[SECURITY FATAL] Use a cryptographically secure random string');
+    process.exit(1);
+  }
+  
+  console.log('[SECURITY] JWT_SECRET validated successfully');
+  return secret;
+})();
 
 export interface AuthenticatedRequest extends Request {
   userId?: string;

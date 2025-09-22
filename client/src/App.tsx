@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,8 +12,10 @@ import { useEffect } from "react";
 // Pages
 import Dashboard from "@/pages/dashboard";
 import ClientChart from "@/pages/client-chart";
+import SessionDetail from "@/pages/session-detail";
 import Documents from "@/pages/documents";
 import Clients from "@/pages/clients";
+import CalendarSettings from "@/pages/calendar-settings";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -65,8 +67,10 @@ function AuthenticatedApp({ user }: { user: any }) {
           <Switch>
             <Route path="/" component={Dashboard} />
             <Route path="/client-chart/:id" component={ClientChart} />
+            <Route path="/session/:id" component={SessionDetail} />
             <Route path="/documents" component={Documents} />
             <Route path="/clients" component={Clients} />
+            <Route path="/calendar/settings" component={CalendarSettings} />
             <Route path="/schedule" component={() => <div>Schedule page coming soon</div>} />
             <Route path="/assessments" component={() => <div>Assessments page coming soon</div>} />
             <Route path="/reports" component={() => <div>Reports page coming soon</div>} />
@@ -84,26 +88,51 @@ function AuthenticatedApp({ user }: { user: any }) {
 function Router() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
+    let isHandlingUnauthorized = false;
+
     // Handle unauthorized errors globally
     const handleUnauthorized = () => {
+      // Prevent infinite loops by checking if we're already handling unauthorized
+      if (isHandlingUnauthorized) return;
+      isHandlingUnauthorized = true;
+      
+      // Clear auth token cookie
+      document.cookie = "token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      
+      // Show toast notification (only once)
       toast({
         title: "Session Expired",
         description: "Please log in again to continue.",
         variant: "destructive",
       });
+      
+      // Clear cache and redirect
+      queryClient.removeQueries({ queryKey: ["/api/auth/me"] });
+      queryClient.setQueryData(["/api/auth/me"], null);
+      
+      // Redirect to login page
+      setLocation("/login");
+      
+      // Reset flag after a short delay to allow for redirect
+      setTimeout(() => {
+        isHandlingUnauthorized = false;
+      }, 1000);
     };
 
     // Listen for unauthorized errors from React Query
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-      if (event?.query?.state.error && isUnauthorizedError(event.query.state.error as Error)) {
+      if (event?.query?.state.error && 
+          isUnauthorizedError(event.query.state.error as Error) && 
+          !isHandlingUnauthorized) {
         handleUnauthorized();
       }
     });
 
     return unsubscribe;
-  }, [toast]);
+  }, [toast, setLocation]);
 
   if (isLoading) {
     return (

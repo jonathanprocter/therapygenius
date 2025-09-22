@@ -1,10 +1,12 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 const navigationItems = [
   { path: "/", icon: "fas fa-chart-line", label: "Dashboard" },
   { path: "/clients", icon: "fas fa-users", label: "Clients" },
-  { path: "/schedule", icon: "fas fa-calendar-alt", label: "Schedule" },
+  { path: "/calendar/settings", icon: "fas fa-calendar-alt", label: "Calendar Sync" },
   { path: "/documents", icon: "fas fa-file-medical", label: "Documents" },
   { path: "/assessments", icon: "fas fa-clipboard-list", label: "Assessments" },
   { path: "/reports", icon: "fas fa-chart-bar", label: "Reports" },
@@ -14,6 +16,7 @@ const aiToolsItems = [
   { path: "/ai/document-analysis", icon: "fas fa-magic", label: "Document Analysis" },
   { path: "/ai/case-insights", icon: "fas fa-lightbulb", label: "Case Insights" },
   { path: "/ai/smart-search", icon: "fas fa-search", label: "Smart Search" },
+  { path: "/calendar/settings", icon: "fas fa-sync-alt", label: "Calendar Sync" },
 ];
 
 interface SidebarProps {
@@ -25,7 +28,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ user }: SidebarProps) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
+  const { toast } = useToast();
 
   const isActive = (path: string) => {
     if (path === "/") {

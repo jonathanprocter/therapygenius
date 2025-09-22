@@ -5,20 +5,13 @@ import type { Document } from "@shared/schema";
 
 export function useDocuments(limit?: number) {
   return useQuery({
-    queryKey: ["/api/documents", limit],
-    queryFn: () => {
-      const url = limit ? `/api/documents?limit=${limit}` : "/api/documents";
-      return fetch(url, { credentials: "include" }).then(res => res.json());
-    },
+    queryKey: limit ? [`/api/documents?limit=${limit}`] : ["/api/documents"],
   });
 }
 
 export function useClientDocuments(clientId: string) {
   return useQuery({
     queryKey: ["/api/documents/client", clientId],
-    queryFn: () => {
-      return fetch(`/api/documents/client/${clientId}`, { credentials: "include" }).then(res => res.json());
-    },
     enabled: !!clientId,
   });
 }
@@ -57,9 +50,26 @@ export function useUploadDocuments() {
         formData.append("clientId", clientId);
       }
 
+      // Handle file upload with CSRF token
+      const headers: Record<string, string> = {};
+      
+      // Fetch CSRF token for file upload
+      try {
+        const csrfResponse = await fetch("/api/csrf-token", {
+          credentials: "include",
+        });
+        if (csrfResponse.ok) {
+          const { csrfToken } = await csrfResponse.json();
+          headers["X-CSRF-Token"] = csrfToken;
+        }
+      } catch (error) {
+        console.error("Failed to fetch CSRF token for upload:", error);
+      }
+      
       const response = await fetch("/api/documents/upload", {
         method: "POST",
         credentials: "include",
+        headers,
         body: formData,
       });
 

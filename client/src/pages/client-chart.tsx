@@ -5,8 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ClientProfile } from "@/components/ClientProfile";
 import { CaseConceptualization } from "@/components/CaseConceptualization";
+import { ClientAITags } from "@/components/ClientAITags";
+import { CalendarSync } from "@/components/CalendarSync";
+import { Calendar, Brain, FileText, TrendingUp, Shield, Link2, User } from "lucide-react";
 import { 
   useClient, 
   useClientSessions, 
@@ -512,10 +516,102 @@ export default function ClientChart() {
             </TabsContent>
 
             <TabsContent value="ai-insights" className="space-y-6">
-              <CaseConceptualization 
-                clientId={clientId} 
-                clientName={`${client.firstName} ${client.lastName}`}
-              />
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                {/* Main AI Profile */}
+                <div className="xl:col-span-2 space-y-6">
+                  <ClientAITags 
+                    clientId={clientId} 
+                    clientName={`${client.firstName} ${client.lastName}`}
+                    className="h-fit"
+                  />
+                  
+                  <CaseConceptualization 
+                    clientId={clientId} 
+                    clientName={`${client.firstName} ${client.lastName}`}
+                  />
+                </div>
+                
+                {/* Quick Insights Sidebar */}
+                <div className="space-y-4">
+                  {/* Session Quick Stats */}
+                  <Card data-testid="ai-quick-stats">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center space-x-2">
+                        <Brain className="w-4 h-4 text-purple-600" />
+                        <span>AI Insights Summary</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div className="text-center p-2 bg-muted/50 rounded">
+                          <div className="font-semibold text-blue-600">{sessions?.length || 0}</div>
+                          <div className="text-xs text-muted-foreground">Sessions</div>
+                        </div>
+                        <div className="text-center p-2 bg-muted/50 rounded">
+                          <div className="font-semibold text-green-600">{documents?.length || 0}</div>
+                          <div className="text-xs text-muted-foreground">Documents</div>
+                        </div>
+                        <div className="text-center p-2 bg-muted/50 rounded">
+                          <div className="font-semibold text-purple-600">{assessments?.length || 0}</div>
+                          <div className="text-xs text-muted-foreground">Assessments</div>
+                        </div>
+                        <div className="text-center p-2 bg-muted/50 rounded">
+                          <div className="font-semibold text-orange-600">{treatmentPlans?.length || 0}</div>
+                          <div className="text-xs text-muted-foreground">Plans</div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Document Auto-linking Status */}
+                  <Card data-testid="document-linking-summary">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center space-x-2">
+                        <Link2 className="w-4 h-4 text-green-600" />
+                        <span>Document Linking</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Linked:</span>
+                          <span className="font-medium text-green-600">
+                            {documents?.filter((doc: any) => doc.sessionId).length || 0}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Available:</span>
+                          <span className="font-medium text-blue-600">
+                            {documents?.filter((doc: any) => !doc.sessionId).length || 0}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Calendar Sourced:</span>
+                          <span className="font-medium text-purple-600">
+                            {documents?.filter((doc: any) => doc.sourceEventId).length || 0}
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Calendar Integration Status */}
+                  <CalendarSync className="" />
+                  
+                  {/* HIPAA Compliance Notice */}
+                  <Alert className="border-purple-200 bg-purple-50" data-testid="client-hipaa-notice">
+                    <Shield className="h-4 w-4 text-purple-600" />
+                    <AlertDescription>
+                      <div className="text-purple-800">
+                        <p className="font-medium text-xs">HIPAA Protected Client Data</p>
+                        <p className="text-xs mt-1">
+                          All AI analysis uses deidentified processing with full audit trail compliance.
+                        </p>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
         </div>

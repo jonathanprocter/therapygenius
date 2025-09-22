@@ -4,9 +4,12 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
 import { DocumentUpload } from "./DocumentUpload";
+import { DocumentAutoLinking } from "./DocumentAutoLinking";
 import { useDocuments, useSearchDocuments, useDeleteDocument } from "@/hooks/useDocuments";
 import { cn } from "@/lib/utils";
+import { Link2, Calendar, Target, AlertTriangle } from "lucide-react";
 import type { Document } from "@shared/schema";
 
 export function DocumentsView() {
@@ -45,6 +48,35 @@ export function DocumentsView() {
       "Insurance": "bg-orange-100 text-orange-800",
     };
     return colors[category] || "bg-gray-100 text-gray-800";
+  };
+
+  const getDocumentStatusIcon = (document: Document) => {
+    if (document.sessionId) {
+      return <Link2 className="w-4 h-4 text-green-600" title="Linked to session" />;
+    }
+    if (document.sourceEventId) {
+      return <Calendar className="w-4 h-4 text-purple-600" title="From calendar" />;
+    }
+    if (document.metadata?.potentialMatches && document.metadata.potentialMatches.length > 0) {
+      return <Target className="w-4 h-4 text-yellow-600" title="Has potential matches" />;
+    }
+    return null;
+  };
+
+  const getConfidenceIndicator = (document: Document) => {
+    if (document.sessionId && document.metadata?.linkingConfidence) {
+      const confidence = document.metadata.linkingConfidence;
+      const percentage = Math.round(confidence * 100);
+      const color = confidence >= 0.9 ? 'text-green-600' : 
+                   confidence >= 0.7 ? 'text-blue-600' : 
+                   confidence >= 0.5 ? 'text-yellow-600' : 'text-orange-600';
+      return (
+        <Badge variant="outline" className={`text-xs ${color} border-current`}>
+          {percentage}% match
+        </Badge>
+      );
+    }
+    return null;
   };
 
   const formatDate = (date: string) => {
@@ -183,6 +215,7 @@ export function DocumentsView() {
                         <i className={cn(getFileIcon(document.fileType), "text-lg")}></i>
                       </div>
                       <div className="flex items-center space-x-2">
+                        {getDocumentStatusIcon(document)}
                         {document.metadata?.analysis?.category && (
                           <Badge 
                             className={getCategoryColor(document.metadata.analysis.category)}
@@ -229,6 +262,29 @@ export function DocumentsView() {
                         )}
                       </div>
                     )}
+
+                    {/* Auto-linking Status */}
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center space-x-2">
+                        {document.sessionId ? (
+                          <div className="flex items-center text-green-600">
+                            <Link2 className="w-3 h-3 mr-1" />
+                            <span>Linked</span>
+                          </div>
+                        ) : document.sourceEventId ? (
+                          <div className="flex items-center text-purple-600">
+                            <Calendar className="w-3 h-3 mr-1" />
+                            <span>Calendar</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-muted-foreground">
+                            <AlertTriangle className="w-3 h-3 mr-1" />
+                            <span>Unlinked</span>
+                          </div>
+                        )}
+                      </div>
+                      {getConfidenceIndicator(document)}
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -244,6 +300,7 @@ export function DocumentsView() {
                       </p>
                     </div>
                     <div className="flex items-center space-x-2">
+                      {getDocumentStatusIcon(document)}
                       {document.metadata?.analysis?.category && (
                         <Badge 
                           className={getCategoryColor(document.metadata.analysis.category)}
@@ -252,6 +309,7 @@ export function DocumentsView() {
                           {document.metadata.analysis.category}
                         </Badge>
                       )}
+                      {getConfidenceIndicator(document)}
                       {document.isProcessed && (
                         <i className="fas fa-magic text-purple-500 text-xs" title="AI Processed"></i>
                       )}

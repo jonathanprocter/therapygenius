@@ -163,7 +163,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get the first/only therapist user
-      const therapist = await storage.getUserByUsername("sjohnson_test");
+      const therapist = await storage.getUserByUsername("jonathan.procter@gmail.com");
       if (!therapist) {
         return res.status(500).json({ message: "System error: No therapist account found" });
       }
@@ -239,7 +239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/clients", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/clients", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const clientData = insertClientSchema.parse({
         ...req.body,
@@ -257,7 +257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/clients/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.put("/api/clients/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const client = await storage.updateClient(req.params.id, req.body, req.userId!);
       if (!client) {
@@ -270,7 +270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/clients/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.delete("/api/clients/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const deleted = await storage.deleteClient(req.params.id, req.userId!);
       if (!deleted) {
@@ -320,7 +320,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/documents/upload", requireAuth, upload.array("files", 10), async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/upload", validateCSRF, requireAuth, upload.array("files", 10), async (req: AuthenticatedRequest, res) => {
     try {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
@@ -464,7 +464,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/documents/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.delete("/api/documents/:id", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const deleted = await storage.deleteDocument(req.params.id, req.userId!);
       if (!deleted) {
@@ -492,7 +492,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Manually link a document to a session
-  app.post("/api/documents/:id/link-session", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/link-session", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const { sessionId, confidence } = req.body;
       
@@ -522,7 +522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Unlink a document from its session
-  app.post("/api/documents/:id/unlink-session", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/unlink-session", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const unlinkedDocument = await storage.unlinkDocumentFromSession(req.params.id, req.userId!);
 
@@ -564,7 +564,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Enhanced AI analysis for document-session matching
-  app.post("/api/documents/:id/analyze-session-matches", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/analyze-session-matches", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const { potentialSessionIds } = req.body;
       
@@ -606,7 +606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Extract calendar context from document
-  app.post("/api/documents/:id/extract-calendar-context", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/:id/extract-calendar-context", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const document = await storage.getDocumentById(req.params.id, req.userId!);
       if (!document) {
@@ -647,7 +647,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bulk re-analyze documents for auto-linking
-  app.post("/api/documents/bulk-reanalyze", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/documents/bulk-reanalyze", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const { documentIds, includeLinked } = req.body;
       
@@ -728,6 +728,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/sessions/:id - Get session details with AI tags
+  app.get("/api/sessions/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { id } = req.params;
+      const session = await storage.getSessionById(id, req.userId!);
+      
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      
+      // Get AI tags for this session
+      const aiTags = await storage.getSessionAITags(session.id, req.userId!);
+      
+      // Get linked documents
+      const linkedDocuments = await storage.getDocumentsBySession(session.id, req.userId!);
+      
+      // Return enhanced session with AI tags and document info
+      const enhancedSession = {
+        ...session,
+        aiTags,
+        linkedDocuments: linkedDocuments.map(doc => ({
+          id: doc.id,
+          fileName: doc.fileName,
+          fileType: doc.fileType,
+          uploadDate: doc.uploadDate,
+          analysis: doc.analysis
+        })),
+        documentCount: linkedDocuments.length,
+        hasAITags: aiTags && Object.keys(aiTags).length > 0,
+        hasLinkedDocuments: linkedDocuments.length > 0
+      };
+      
+      res.json(enhancedSession);
+    } catch (error) {
+      console.error("Error fetching session:", error);
+      res.status(500).json({ message: "Failed to fetch session" });
+    }
+  });
+
   app.get("/api/sessions/recent", requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
@@ -756,7 +795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/sessions", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/sessions", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const sessionData = insertSessionSchema.parse({
         ...req.body,
@@ -891,7 +930,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/calendar/sync", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/calendar/sync", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
       const syncStatus = await calendarModule.calendarSync.syncCalendar(req.userId!);
@@ -919,7 +958,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/calendar/disconnect", requireAuth, async (req: AuthenticatedRequest, res) => {
+  // GET /api/calendar/stats - Calendar sync statistics for dashboard
+  app.get("/api/calendar/stats", requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      const stats = await calendarModule.calendarSync.getSyncStatus(req.userId!);
+      
+      // Transform status into stats format expected by UI
+      const calendarStats = {
+        isConnected: stats.isAuthenticated,
+        lastSync: stats.lastSync,
+        eventsProcessed: stats.eventsProcessed || 0,
+        sessionsMatched: stats.matchesFound || 0,
+        errors: stats.errors || [],
+        nextSync: stats.nextSync,
+        syncHealth: stats.errors && stats.errors.length > 0 ? "error" : 
+                   stats.isAuthenticated ? "healthy" : "disconnected",
+        rateLimitRemaining: stats.rateLimitRemaining,
+        quotaUsed: stats.quotaUsed,
+        totalEvents: stats.eventsProcessed || 0,
+        successRate: stats.eventsProcessed > 0 ? 
+          Math.round(((stats.eventsProcessed - (stats.errors?.length || 0)) / stats.eventsProcessed) * 100) : 0
+      };
+      
+      res.json(calendarStats);
+    } catch (error) {
+      console.error("Error getting calendar stats:", error);
+      res.status(500).json({ 
+        message: "Failed to get calendar stats",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.delete("/api/calendar/disconnect", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
       await calendarModule.calendarSync.revokeAccess(req.userId!);
@@ -944,7 +1016,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/assessments", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/assessments", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const assessmentData = insertAssessmentSchema.parse({
         ...req.body,
@@ -973,7 +1045,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/treatment-plans", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/treatment-plans", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const planData = insertTreatmentPlanSchema.parse({
         ...req.body,
@@ -992,7 +1064,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // AI features routes
-  app.post("/api/ai/case-conceptualization/:clientId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/ai/case-conceptualization/:clientId", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const conceptualization = await generateCaseConceptualization(req.params.clientId, req.userId!);
       res.json(conceptualization);
@@ -1003,7 +1075,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // System maintenance routes
-  app.post("/api/system/repair-documents", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/system/repair-documents", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const result = await repairDocumentSystem();
       res.json(result);
@@ -1023,7 +1095,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/system/cleanup-files", requireAuth, async (req: AuthenticatedRequest, res) => {
+  app.post("/api/system/cleanup-files", validateCSRF, requireAuth, async (req: AuthenticatedRequest, res) => {
     try {
       const result = await cleanupOrphanedFiles();
       res.json(result);
