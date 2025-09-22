@@ -1,0 +1,52 @@
+{
+  "name": "TherapyFlow - Practice Management",
+  "short_name": "TherapyFlow",
+  "description": "Comprehensive therapy practice management system with AI-powered document analysis and HIPAA compliance",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2f3349",
+  "orientation": "portrait-primary",
+  "categories": ["medical", "productivity", "health"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSIyNCIgZmlsbD0iIzJmMzM0OSIvPjxwYXRoIGQ9Ik05NiA0OGMtMjYuNTEgMC00OCAyMS40OS00OCA0OHMyMS40OSA0OCA0OCA0OCA0OC0yMS40OSA0OC00OC0yMS40OS00OC00OC00OHptMCA4MGMtMTcuNjczIDAtMzItMTQuMzI3LTMyLTMyczE0LjMyNy0zMiAzMi0zMiAzMiAxNC4zMjcgMzIgMzItMTQuMzI3IDMyLTMyIDMyeiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSI2NCIgZmlsbD0iIzJmMzM0OSIvPjxwYXRoIGQ9Ik0yNTYgMTI4Yy03MC42OTIgMC0xMjggNTcuMzA4LTEyOCAxMjhzNTcuMzA4IDEyOCAxMjggMTI4IDEyOC01Ny4zMDggMTI4LTEyOC01Ny4zMDgtMTI4LTEyOC0xMjh6bTAgMjEzLjMzM2MtNDcuMTI4IDAtODUuMzMzLTM4LjIwNS04NS4zMzMtODUuMzMzczM4LjIwNS04NS4zMzMgODUuMzMzLTg1LjMzMyA4NS4zMzMgMzguMjA1IDg1LjMzMyA4NS4zMzMtMzguMjA1IDg1LjMzMy04NS4zMzMgODUuMzMzeiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgdmlld0JveD0iMCAwIDE4MCAxODAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjE4MCIgaGVpZ2h0PSIxODAiIHJ4PSIyNCIgZmlsbD0iIzJmMzM0OSIvPjxwYXRoIGQ9Ik05MCA0NWMtMjQuODUzIDAtNDUgMjAuMTQ3LTQ1IDQ1czIwLjE0NyA0NSA0NSA0NSA0NS0yMC4xNDcgNDUtNDUtMjAuMTQ3LTQ1LTQ1LTQ1em0wIDc1Yy0xNi41NjkgMC0zMC0xMy40MzEtMzAtMzBzMTMuNDMxLTMwIDMwLTMwIDMwIDEzLjQzMSAzMCAzMC0xMy40MzEgMzAtMzAgMzB6IiBmaWxsPSIjZmZmIi8+PC9zdmc+",
+      "sizes": "180x180",
+      "type": "image/svg+xml",
+      "purpose": "apple-touch-icon"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzkwIiBoZWlnaHQ9IjY0NCIgdmlld0JveD0iMCAwIDM5MCA2NDQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjM5MCIgaGVpZ2h0PSI2NDQiIGZpbGw9IiNmOWZhZmIiLz48dGV4dCB4PSIxOTUiIHk9IjMyMiIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjQiIGZpbGw9IiM2MzY2ZjEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPlRoZXJhcHlGbG93PC90ZXh0Pjx0ZXh0IHg9IjE5NSIgeT0iMzYwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UHJhY3RpY2UgTWFuYWdlbWVudDwvdGV4dD48L3N2Zz4=",
+      "sizes": "390x644",
+      "type": "image/svg+xml",
+      "form_factor": "narrow",
+      "label": "TherapyFlow Mobile View"
+    }
+  ],
+  "features": [
+    "Cross Platform",
+    "Fast",
+    "Simple"
+  ],
+  "edge_side_panel": {
+    "preferred_width": 480
+  },
+  "prefer_related_applications": false
+}
