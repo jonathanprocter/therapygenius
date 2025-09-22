@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 
@@ -670,6 +670,53 @@ export function useClientReports(clientId: string) {
       return failureCount < 2;
     },
   });
+}
+
+// All Client Reports Hook - Uses useQueries to avoid Rules of Hooks violations
+export function useAllClientReports(clientIds: string[]) {
+  const queries = useQueries({
+    queries: (clientIds || []).map((clientId) => ({
+      queryKey: ['/api/clients', clientId, 'reports'],
+      queryFn: async () => {
+        try {
+          const response = await apiRequest('GET', `/api/clients/${clientId}/reports`);
+          const data = await response.json();
+          return { clientId, ...data };
+        } catch (error: any) {
+          if (error.message?.includes('404')) {
+            return { clientId, reports: [], hasReports: false };
+          }
+          throw new Error(`Failed to fetch client reports: ${error.message || 'Unknown error'}`);
+        }
+      },
+      enabled: !!clientId,
+      retry: (failureCount: number, error: any) => {
+        if (error.message?.includes('404') || error.message?.includes('403')) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+    }))
+  });
+
+  // Aggregate results from all queries
+  const isLoading = queries.some(query => query.isLoading);
+  const hasError = queries.some(query => query.error);
+  const errors = queries.filter(query => query.error).map(query => query.error);
+  
+  // Combine all reports from successful queries
+  const allReportsData = queries
+    .filter(query => query.data && !query.error)
+    .map(query => query.data)
+    .filter(data => data && data.reports);
+
+  return {
+    data: allReportsData,
+    isLoading,
+    hasError,
+    errors,
+    queries // Expose individual queries if needed for more granular control
+  };
 }
 
 export function useGenerateClientReport(clientId: string) {

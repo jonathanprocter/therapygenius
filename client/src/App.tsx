@@ -15,6 +15,11 @@ import Documents from "@/pages/documents";
 import Clients from "@/pages/clients";
 import CalendarSettings from "@/pages/calendar-settings";
 import NotFound from "@/pages/not-found";
+import Reports from "@/pages/reports";
+import Assessments from "@/pages/assessments";
+import AISmartSearch from "@/pages/ai/smart-search";
+import AICaseInsights from "@/pages/ai/case-insights";
+import AIDocumentAnalysis from "@/pages/ai/document-analysis";
 
 function AppHeader({ onMenuToggle, isMobileMenuOpen }: { onMenuToggle?: () => void; isMobileMenuOpen?: boolean }) {
   const isMobile = useIsMobile();
@@ -232,11 +237,11 @@ function MainApp() {
             <Route path="/clients" component={Clients} />
             <Route path="/calendar/settings" component={CalendarSettings} />
             <Route path="/schedule" component={() => <div>Schedule page coming soon</div>} />
-            <Route path="/assessments" component={() => <div>Assessments page coming soon</div>} />
-            <Route path="/reports" component={() => <div>Reports page coming soon</div>} />
-            <Route path="/ai/document-analysis" component={() => <div>AI Document Analysis coming soon</div>} />
-            <Route path="/ai/case-insights" component={() => <div>AI Case Insights coming soon</div>} />
-            <Route path="/ai/smart-search" component={() => <div>AI Smart Search coming soon</div>} />
+            <Route path="/assessments" component={Assessments} />
+            <Route path="/reports" component={Reports} />
+            <Route path="/ai/document-analysis" component={AIDocumentAnalysis} />
+            <Route path="/ai/case-insights" component={AICaseInsights} />
+            <Route path="/ai/smart-search" component={AISmartSearch} />
             <Route component={NotFound} />
           </Switch>
         </main>
