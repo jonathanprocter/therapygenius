@@ -1,5 +1,6 @@
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
+import path from "path";
 import { storage } from "./storage";
 import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir, processDocumentWithAutoLinking, DocumentUploadContext } from "./document-processor";
 import { analyzeDocument, generateCaseConceptualization, analyzeDocumentForSessionMatching, extractCalendarContext, generateAutoLinkingMetadata } from "./documentTagger";
@@ -188,7 +189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             therapistId: THERAPIST_ID,
             clientId,
             fileName: file.originalname,
-            fileType: file.mimetype,
+            fileType: path.extname(file.originalname).toLowerCase(),
             fileSize: file.size,
             filePath: file.path,
           });
