@@ -185,14 +185,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[Upload] Processing file: ${file.originalname}`);
           
           // Create document record
-          const document = await storage.createDocument({
+          const documentData = {
             therapistId: THERAPIST_ID,
             clientId,
             fileName: file.originalname,
             fileType: path.extname(file.originalname).toLowerCase(),
             fileSize: file.size,
             filePath: file.path,
+          };
+          
+          console.log(`[Upload Debug] Document data for ${file.originalname}:`, {
+            fileName: documentData.fileName,
+            fileNameLength: documentData.fileName.length,
+            fileType: documentData.fileType,
+            fileTypeLength: documentData.fileType.length,
+            filePath: documentData.filePath,
+            filePathLength: documentData.filePath.length
           });
+          
+          const document = await storage.createDocument(documentData);
 
           // Process document synchronously to return full AutoLinkingResult
           try {
