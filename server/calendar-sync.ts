@@ -737,6 +737,16 @@ class CalendarSyncService {
         if (match) {
           const extractedName = match[1].trim().toLowerCase();
           
+          // CRITICAL FIX: Check for exact full name match FIRST to prevent Nancy/David Grossman mix-ups
+          if (extractedName === fullName) {
+            return {
+              clientId: client.id,
+              confidence: 0.95,
+              matchReason: 'SimplePractice exact full name match',
+              client
+            };
+          }
+          
           // SECURITY FIX: Apply ambiguous name protection to pattern matching
           if (isAmbiguousName) {
             // For ambiguous names, only allow exact matches
@@ -759,12 +769,13 @@ class CalendarSyncService {
               };
             }
             
-            // Check if extracted name contains first or last name
-            if (extractedName.includes(firstName) || extractedName.includes(lastName)) {
+            // CRITICAL FIX: Only allow partial matches if both first AND last name are present to avoid mix-ups
+            // This prevents "nancy grossman" from matching just "grossman" for David
+            if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
               return {
                 clientId: client.id,
                 confidence: 0.8,
-                matchReason: 'SimplePractice partial name match',
+                matchReason: 'SimplePractice partial name match (both names)',
                 client
               };
             }
