@@ -5,6 +5,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { DocumentUpload } from "./DocumentUpload";
 import { DocumentAutoLinking } from "./DocumentAutoLinking";
 import { useDocuments, useSearchDocuments, useDeleteDocument } from "@/hooks/useDocuments";
@@ -173,6 +184,67 @@ export function DocumentsView() {
           </>
         )}
       </Button>
+    );
+  };
+
+  const DeleteDocumentButton = ({ document }: { document: Document }) => {
+    const handleDelete = () => {
+      deleteMutation.mutate(document.id, {
+        onSuccess: () => {
+          // If there's an active search, refresh the search results
+          if (searchQuery.trim() && searchMutation.data) {
+            searchMutation.mutate(searchQuery);
+          }
+        }
+      });
+    };
+
+    return (
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => e.stopPropagation()}
+            disabled={deleteMutation.isPending}
+            className="text-xs px-2 py-1 h-auto text-red-600 hover:text-red-700 hover:bg-red-50"
+            data-testid={`delete-document-${document.id}`}
+          >
+            <i className="fas fa-trash text-xs" />
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent data-testid={`delete-document-dialog-${document.id}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Document</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{document.fileName}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid={`cancel-delete-${document.id}`}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-red-600 hover:bg-red-700"
+              data-testid={`confirm-delete-${document.id}`}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <i className="fas fa-spinner fa-spin mr-2" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-trash mr-2" />
+                  Delete
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     );
   };
 
@@ -375,8 +447,9 @@ export function DocumentsView() {
                         {getConfidenceIndicator(document)}
                       </div>
                       
-                      {/* Assessment Actions */}
-                      <div className="flex items-center justify-end">
+                      {/* Document Actions */}
+                      <div className="flex items-center justify-between">
+                        <DeleteDocumentButton document={document} />
                         <DocumentAssessmentButton document={document} />
                       </div>
                     </div>
@@ -411,6 +484,7 @@ export function DocumentsView() {
                         <i className="fas fa-magic text-purple-500 text-xs" title="AI Processed"></i>
                       )}
                       <DocumentAssessmentButton document={document} />
+                      <DeleteDocumentButton document={document} />
                     </div>
                   </>
                 )}
