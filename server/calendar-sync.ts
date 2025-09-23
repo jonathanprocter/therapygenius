@@ -634,14 +634,42 @@ class CalendarSyncService {
       const firstName = client.firstName.toLowerCase();
       const lastName = client.lastName.toLowerCase();
       
-      // Standard check: both first and last name appear in event title
-      if (eventTitle.includes(firstName) && eventTitle.includes(lastName)) {
-        return {
-          clientId: client.id,
-          confidence: 0.9,
-          matchReason: 'Direct name match in event title',
-          client
-        };
+      // SECURITY FIX: Prevent over-matching on ambiguous names like "J K"
+      // Require minimum name lengths and more precise matching for short names
+      const MIN_NAME_LENGTH = 2;
+      const isAmbiguousName = firstName.length <= MIN_NAME_LENGTH || lastName.length <= MIN_NAME_LENGTH;
+      
+      if (isAmbiguousName) {
+        // For very short names (like "J K"), require exact word boundary matches
+        // This prevents "JK Mom's Card" from matching client "J K"
+        const firstNamePattern = new RegExp(`\\b${firstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        const lastNamePattern = new RegExp(`\\b${lastName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        const fullNamePattern = new RegExp(`\\b${firstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${lastName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        
+        // Only match if we find the exact full name pattern or very specific formats
+        if (fullNamePattern.test(eventTitle)) {
+          return {
+            clientId: client.id,
+            confidence: 0.9,
+            matchReason: 'Exact name pattern match (ambiguous name protection)',
+            client
+          };
+        }
+        
+        // Skip individual letter matching for ambiguous names to prevent false positives
+        // Log the skipped match for debugging
+        console.log(`[Calendar Sync] [SECURITY] Skipping ambiguous name match for "${firstName} ${lastName}" in event "${eventTitle.substring(0, 50)}..."`);
+        
+      } else {
+        // Standard check for longer names: both first and last name appear in event title
+        if (eventTitle.includes(firstName) && eventTitle.includes(lastName)) {
+          return {
+            clientId: client.id,
+            confidence: 0.9,
+            matchReason: 'Direct name match in event title',
+            client
+          };
+        }
       }
 
       // SimplePractice format: "My Bookable Calendar w/ [Name]"
@@ -659,14 +687,27 @@ class CalendarSyncService {
           };
         }
         
-        // Check if extracted name contains both first and last name
-        if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
-          return {
-            clientId: client.id,
-            confidence: 0.85,
-            matchReason: 'SimplePractice partial name match',
-            client
-          };
+        // SECURITY FIX: Apply same ambiguous name protection to SimplePractice matching
+        if (isAmbiguousName) {
+          // For ambiguous names, require exact match only
+          if (extractedName === fullName) {
+            return {
+              clientId: client.id,
+              confidence: 0.85,
+              matchReason: 'SimplePractice exact name match (ambiguous name protection)',
+              client
+            };
+          }
+        } else {
+          // Check if extracted name contains both first and last name
+          if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
+            return {
+              clientId: client.id,
+              confidence: 0.85,
+              matchReason: 'SimplePractice partial name match',
+              client
+            };
+          }
         }
 
         // Check if extracted name matches just first name (for single-name clients)
@@ -696,24 +737,37 @@ class CalendarSyncService {
         if (match) {
           const extractedName = match[1].trim().toLowerCase();
           
-          // Check for exact first name or last name match
-          if (extractedName === firstName || extractedName === lastName) {
-            return {
-              clientId: client.id,
-              confidence: 0.85,
-              matchReason: 'SimplePractice name pattern match',
-              client
-            };
-          }
-          
-          // Check if extracted name contains first or last name
-          if (extractedName.includes(firstName) || extractedName.includes(lastName)) {
-            return {
-              clientId: client.id,
-              confidence: 0.8,
-              matchReason: 'SimplePractice partial name match',
-              client
-            };
+          // SECURITY FIX: Apply ambiguous name protection to pattern matching
+          if (isAmbiguousName) {
+            // For ambiguous names, only allow exact matches
+            if (extractedName === firstName || extractedName === lastName) {
+              return {
+                clientId: client.id,
+                confidence: 0.85,
+                matchReason: 'SimplePractice exact name pattern match (ambiguous name protection)',
+                client
+              };
+            }
+          } else {
+            // Check for exact first name or last name match
+            if (extractedName === firstName || extractedName === lastName) {
+              return {
+                clientId: client.id,
+                confidence: 0.85,
+                matchReason: 'SimplePractice name pattern match',
+                client
+              };
+            }
+            
+            // Check if extracted name contains first or last name
+            if (extractedName.includes(firstName) || extractedName.includes(lastName)) {
+              return {
+                clientId: client.id,
+                confidence: 0.8,
+                matchReason: 'SimplePractice partial name match',
+                client
+              };
+            }
           }
         }
       }
@@ -731,14 +785,28 @@ class CalendarSyncService {
       for (const pattern of namePatterns) {
         const match = eventTitle.match(pattern);
         if (match) {
-          const extractedName = match[1].trim();
-          if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
-            return {
-              clientId: client.id,
-              confidence: 0.8,
-              matchReason: 'Pattern-based name match',
-              client
-            };
+          const extractedName = match[1].trim().toLowerCase();
+          
+          // SECURITY FIX: Apply ambiguous name protection to alternative patterns
+          if (isAmbiguousName) {
+            // For ambiguous names, require exact full name match
+            if (extractedName === fullName) {
+              return {
+                clientId: client.id,
+                confidence: 0.8,
+                matchReason: 'Pattern-based exact name match (ambiguous name protection)',
+                client
+              };
+            }
+          } else {
+            if (extractedName.includes(firstName) && extractedName.includes(lastName)) {
+              return {
+                clientId: client.id,
+                confidence: 0.8,
+                matchReason: 'Pattern-based name match',
+                client
+              };
+            }
           }
         }
       }
