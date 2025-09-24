@@ -7,6 +7,7 @@ import {
   treatmentPlans,
   auditLogs,
   rateLimitCounters,
+  calendarSyncHistory,
   calendarEventReviews,
   type User,
   type InsertUser,
@@ -24,6 +25,8 @@ import {
   type InsertAuditLog,
   type RateLimitCounter,
   type InsertRateLimitCounter,
+  type CalendarSyncHistory,
+  type InsertCalendarSyncHistory,
   type CalendarEventReview,
   type InsertCalendarEventReview,
 } from "@shared/schema";
@@ -112,6 +115,36 @@ export interface IStorage {
   }): Promise<void>;
   getSessionByExternalEventId(externalEventId: string, therapistId: string): Promise<Session | null>;
   
+  // Calendar Sync History methods - Detailed sync outcome tracking
+  createCalendarSyncHistory(syncHistory: InsertCalendarSyncHistory): Promise<CalendarSyncHistory>;
+  updateCalendarSyncHistory(id: string, updates: Partial<CalendarSyncHistory>, therapistId: string): Promise<CalendarSyncHistory | null>;
+  getCalendarSyncHistoryById(id: string, therapistId: string): Promise<CalendarSyncHistory | null>;
+  getCalendarSyncHistory(therapistId: string, options?: {
+    limit?: number;
+    offset?: number;
+    status?: string;
+    syncType?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<CalendarSyncHistory[]>;
+  getLatestSyncStatus(therapistId: string): Promise<CalendarSyncHistory | null>;
+  getCurrentRunningSyncs(therapistId: string): Promise<CalendarSyncHistory[]>;
+  getSyncStatistics(therapistId: string, options?: {
+    timeRange?: { start: Date; end: Date };
+    syncType?: string;
+  }): Promise<{
+    totalSyncs: number;
+    successfulSyncs: number;
+    failedSyncs: number;
+    avgProcessingTime: number;
+    totalEventsProcessed: number;
+    totalEventsMatched: number;
+    totalEventsRejected: number;
+    lastSuccessfulSync: Date | null;
+    recentErrors: string[];
+  }>;
+  deleteOldSyncHistory(therapistId: string, olderThanDays: number): Promise<number>;
+
   // Calendar Event Review methods - Manual review system for rejected calendar events
   createCalendarEventReview(review: InsertCalendarEventReview): Promise<CalendarEventReview>;
   getPendingCalendarEventReviews(therapistId: string): Promise<Array<CalendarEventReview & { suggestedClient: Client | null }>>;
@@ -833,6 +866,197 @@ export class DatabaseStorage implements IStorage {
       );
 
     return result?.count || 0;
+  }
+
+  // Calendar Sync History implementations - Detailed sync outcome tracking
+  async createCalendarSyncHistory(syncHistory: InsertCalendarSyncHistory): Promise<CalendarSyncHistory> {
+    const [createdHistory] = await db
+      .insert(calendarSyncHistory)
+      .values(syncHistory)
+      .returning();
+    return createdHistory;
+  }
+
+  async updateCalendarSyncHistory(id: string, updates: Partial<CalendarSyncHistory>, therapistId: string): Promise<CalendarSyncHistory | null> {
+    const [updatedHistory] = await db
+      .update(calendarSyncHistory)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(
+        and(
+          eq(calendarSyncHistory.id, id),
+          eq(calendarSyncHistory.therapistId, therapistId)
+        )
+      )
+      .returning();
+
+    return updatedHistory || null;
+  }
+
+  async getCalendarSyncHistoryById(id: string, therapistId: string): Promise<CalendarSyncHistory | null> {
+    const [history] = await db
+      .select()
+      .from(calendarSyncHistory)
+      .where(
+        and(
+          eq(calendarSyncHistory.id, id),
+          eq(calendarSyncHistory.therapistId, therapistId)
+        )
+      );
+
+    return history || null;
+  }
+
+  async getCalendarSyncHistory(therapistId: string, options?: {
+    limit?: number;
+    offset?: number;
+    status?: string;
+    syncType?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<CalendarSyncHistory[]> {
+    let query = db
+      .select()
+      .from(calendarSyncHistory)
+      .where(eq(calendarSyncHistory.therapistId, therapistId));
+
+    // Apply filters
+    if (options?.status) {
+      query = query.where(eq(calendarSyncHistory.status, options.status));
+    }
+    if (options?.syncType) {
+      query = query.where(eq(calendarSyncHistory.syncType, options.syncType));
+    }
+    if (options?.startDate) {
+      query = query.where(gte(calendarSyncHistory.startTime, options.startDate));
+    }
+    if (options?.endDate) {
+      query = query.where(lte(calendarSyncHistory.startTime, options.endDate));
+    }
+
+    // Order by newest first
+    query = query.orderBy(desc(calendarSyncHistory.startTime));
+
+    // Apply pagination
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+    if (options?.offset) {
+      query = query.offset(options.offset);
+    }
+
+    return await query;
+  }
+
+  async getLatestSyncStatus(therapistId: string): Promise<CalendarSyncHistory | null> {
+    const [latest] = await db
+      .select()
+      .from(calendarSyncHistory)
+      .where(eq(calendarSyncHistory.therapistId, therapistId))
+      .orderBy(desc(calendarSyncHistory.startTime))
+      .limit(1);
+
+    return latest || null;
+  }
+
+  async getCurrentRunningSyncs(therapistId: string): Promise<CalendarSyncHistory[]> {
+    return await db
+      .select()
+      .from(calendarSyncHistory)
+      .where(
+        and(
+          eq(calendarSyncHistory.therapistId, therapistId),
+          eq(calendarSyncHistory.status, 'running')
+        )
+      )
+      .orderBy(desc(calendarSyncHistory.startTime));
+  }
+
+  async getSyncStatistics(therapistId: string, options?: {
+    timeRange?: { start: Date; end: Date };
+    syncType?: string;
+  }): Promise<{
+    totalSyncs: number;
+    successfulSyncs: number;
+    failedSyncs: number;
+    avgProcessingTime: number;
+    totalEventsProcessed: number;
+    totalEventsMatched: number;
+    totalEventsRejected: number;
+    lastSuccessfulSync: Date | null;
+    recentErrors: string[];
+  }> {
+    let baseQuery = db
+      .select()
+      .from(calendarSyncHistory)
+      .where(eq(calendarSyncHistory.therapistId, therapistId));
+
+    // Apply filters
+    if (options?.timeRange) {
+      baseQuery = baseQuery.where(
+        and(
+          gte(calendarSyncHistory.startTime, options.timeRange.start),
+          lte(calendarSyncHistory.startTime, options.timeRange.end)
+        )
+      );
+    }
+    if (options?.syncType) {
+      baseQuery = baseQuery.where(eq(calendarSyncHistory.syncType, options.syncType));
+    }
+
+    const allSyncs = await baseQuery;
+
+    const totalSyncs = allSyncs.length;
+    const successfulSyncs = allSyncs.filter(s => s.status === 'completed').length;
+    const failedSyncs = allSyncs.filter(s => s.status === 'failed').length;
+    
+    const completedSyncs = allSyncs.filter(s => s.status === 'completed' && s.processingTimeMs);
+    const avgProcessingTime = completedSyncs.length > 0 
+      ? completedSyncs.reduce((sum, s) => sum + (s.processingTimeMs || 0), 0) / completedSyncs.length
+      : 0;
+
+    const totalEventsProcessed = allSyncs.reduce((sum, s) => sum + (s.eventsTotal || 0), 0);
+    const totalEventsMatched = allSyncs.reduce((sum, s) => sum + (s.eventsMatched || 0), 0);
+    const totalEventsRejected = allSyncs.reduce((sum, s) => sum + (s.eventsRejected || 0), 0);
+
+    const lastSuccessfulSync = allSyncs
+      .filter(s => s.status === 'completed')
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0]?.endTime || null;
+
+    // Get recent errors from failed syncs
+    const recentErrors = allSyncs
+      .filter(s => s.status === 'failed' && s.errors)
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
+      .slice(0, 10)
+      .flatMap(s => Array.isArray(s.errors) ? s.errors : [])
+      .slice(0, 20);
+
+    return {
+      totalSyncs,
+      successfulSyncs,
+      failedSyncs,
+      avgProcessingTime,
+      totalEventsProcessed,
+      totalEventsMatched,
+      totalEventsRejected,
+      lastSuccessfulSync,
+      recentErrors: recentErrors as string[]
+    };
+  }
+
+  async deleteOldSyncHistory(therapistId: string, olderThanDays: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+
+    const result = await db
+      .delete(calendarSyncHistory)
+      .where(
+        and(
+          eq(calendarSyncHistory.therapistId, therapistId),
+          lte(calendarSyncHistory.startTime, cutoffDate)
+        )
+      );
+
+    return result.rowCount || 0;
   }
 
   // HIPAA Audit logging implementation - tamper-evident, persistent logging

@@ -7,6 +7,7 @@ const navigationItems = [
   { path: "/", icon: "fas fa-chart-line", label: "Dashboard" },
   { path: "/clients", icon: "fas fa-users", label: "Clients" },
   { path: "/calendar/settings", icon: "fas fa-calendar-alt", label: "Calendar Sync" },
+  { path: "/calendar/sync-dashboard", icon: "fas fa-analytics", label: "Sync Dashboard" },
   { path: "/calendar/reviews", icon: "fas fa-exclamation-triangle", label: "Calendar Reviews", badge: true },
   { path: "/documents", icon: "fas fa-file-medical", label: "Documents" },
   { path: "/assessments", icon: "fas fa-clipboard-list", label: "Assessments" },
@@ -24,10 +25,12 @@ export function Sidebar() {
   const [location, setLocation] = useLocation();
 
   // Fetch pending calendar review count
-  const { data: pendingCount = 0 } = useQuery({
+  const { data: pendingResponse } = useQuery({
     queryKey: ["/api/calendar/pending-count"],
     refetchInterval: 30000, // Refresh every 30 seconds
   });
+  
+  const pendingCount = (pendingResponse as any)?.count || 0;
 
   const isActive = (path: string) => {
     if (path === "/") {

@@ -799,6 +799,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Enhanced manual sync endpoint with detailed tracking
+  app.post("/api/calendar/sync-now", async (req: Request, res) => {
+    try {
+      const { forceFullSync = false } = req.body;
+      
+      const calendarModule = await import("./calendar-sync");
+      const syncResult = await calendarModule.calendarSync.syncCalendarWithDetailedTracking(
+        THERAPIST_ID, 
+        'user_manual',
+        forceFullSync
+      );
+      
+      res.json({
+        success: syncResult.success,
+        message: syncResult.success ? "Calendar sync completed successfully" : "Calendar sync failed",
+        data: {
+          syncHistoryId: syncResult.syncHistoryId,
+          processingTimeMs: syncResult.processingTimeMs,
+          statistics: {
+            eventsTotal: syncResult.eventsTotal,
+            eventsMatched: syncResult.eventsMatched,
+            eventsRejected: syncResult.eventsRejected,
+            eventsError: syncResult.eventsError,
+            sessionsCreated: syncResult.sessionsCreated,
+            sessionsUpdated: syncResult.sessionsUpdated
+          },
+          errors: syncResult.errors,
+          syncDetails: syncResult.syncDetails
+        }
+      });
+    } catch (error) {
+      console.error("Error performing manual calendar sync:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Manual calendar sync failed",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  // Enhanced sync status endpoint with detailed history and statistics
+  app.get("/api/calendar/sync-status", async (req: Request, res) => {
+    try {
+      const calendarModule = await import("./calendar-sync");
+      const detailedStatus = await calendarModule.calendarSync.getDetailedSyncStatus(THERAPIST_ID);
+      
+      res.json({
+        currentStatus: detailedStatus.currentStatus,
+        isAuthenticated: detailedStatus.isAuthenticated,
+        lastSync: detailedStatus.lastSync,
+        runningSyncs: detailedStatus.runningSyncs,
+        recentHistory: detailedStatus.recentHistory,
+        statistics: detailedStatus.statistics
+      });
+    } catch (error) {
+      console.error("Error getting detailed calendar status:", error);
+      res.status(500).json({ 
+        message: "Failed to get calendar status",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  // Legacy sync endpoint (kept for backward compatibility)
   app.post("/api/calendar/sync", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");
@@ -813,6 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Legacy status endpoint (kept for backward compatibility)
   app.get("/api/calendar/status", async (req: Request, res) => {
     try {
       const calendarModule = await import("./calendar-sync");

@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import { 
   Calendar, 
   Settings, 
@@ -22,10 +23,14 @@ import {
   Server,
   Key,
   Globe,
-  User
+  User,
+  Play,
+  Loader2,
+  TrendingUp,
+  Activity
 } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient } from '@/lib/queryClient';
+import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { CalendarSync } from '@/components/CalendarSync';
 import { CalendarSyncDashboard } from '@/components/CalendarSyncDashboard';
@@ -44,10 +49,45 @@ export default function CalendarSettings() {
   
   const { toast } = useToast();
 
-  // Get current calendar status
-  const { data: calendarStatus, isLoading: statusLoading } = useQuery({
+  // Get enhanced calendar status with detailed tracking
+  const { data: syncStatus, isLoading: statusLoading, refetch: refetchStatus } = useQuery({
+    queryKey: ['/api/calendar/sync-status'],
+    refetchInterval: 5000, // More frequent updates for real-time monitoring
+  });
+
+  // Legacy status for backward compatibility
+  const { data: calendarStatus } = useQuery({
     queryKey: ['/api/calendar/status'],
     refetchInterval: 30000,
+  });
+
+  // Manual sync mutation with detailed tracking
+  const manualSyncMutation = useMutation({
+    mutationFn: async (forceFullSync: boolean = false) => {
+      return await apiRequest('/api/calendar/sync-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceFullSync })
+      });
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Sync Completed",
+        description: `Successfully processed ${data.data.statistics.eventsTotal} events in ${Math.round(data.data.processingTimeMs / 1000)}s`,
+      });
+      
+      // Invalidate and refetch status
+      queryClient.invalidateQueries({ queryKey: ['/api/calendar/sync-status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/calendar/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/calendar/pending-count'] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Sync Failed",
+        description: error instanceof Error ? error.message : "Failed to sync calendar",
+        variant: "destructive",
+      });
+    },
   });
 
   // Mock settings mutation (would be real API in production)
@@ -264,65 +304,228 @@ export default function CalendarSettings() {
               </CardContent>
             </Card>
 
-            {/* Sync Status */}
-            <Card data-testid="sync-status">
+            {/* Manual Sync Controls */}
+            <Card data-testid="manual-sync-controls">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
-                  <Clock className="w-5 h-5" />
-                  <span>Current Status</span>
+                  <Play className="w-5 h-5" />
+                  <span>Manual Sync</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Current Status Indicator */}
+                <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      syncStatus?.currentStatus === 'running' ? 'bg-yellow-500 animate-pulse' :
+                      syncStatus?.currentStatus === 'error' ? 'bg-red-500' :
+                      'bg-green-500'
+                    }`}></div>
+                    <div>
+                      <p className="font-medium text-sm">
+                        {syncStatus?.currentStatus === 'running' ? 'Sync Running' :
+                         syncStatus?.currentStatus === 'error' ? 'Last Sync Failed' :
+                         'Ready to Sync'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {syncStatus?.lastSync ? 
+                          `Last sync: ${new Date(syncStatus.lastSync).toLocaleString()}` :
+                          'No previous sync'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                  <Badge 
+                    variant={syncStatus?.currentStatus === 'running' ? 'default' : 'outline'}
+                    className="text-xs"
+                  >
+                    {syncStatus?.currentStatus || 'idle'}
+                  </Badge>
+                </div>
+
+                {/* Manual Sync Buttons */}
+                <div className="space-y-3">
+                  <Button 
+                    onClick={() => manualSyncMutation.mutate(false)}
+                    disabled={manualSyncMutation.isPending || syncStatus?.currentStatus === 'running' || !syncStatus?.isAuthenticated}
+                    className="w-full"
+                    data-testid="sync-now-button"
+                  >
+                    {manualSyncMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Sync Now (Incremental)
+                      </>
+                    )}
+                  </Button>
+                  
+                  <Button 
+                    variant="outline"
+                    onClick={() => manualSyncMutation.mutate(true)}
+                    disabled={manualSyncMutation.isPending || syncStatus?.currentStatus === 'running' || !syncStatus?.isAuthenticated}
+                    className="w-full"
+                    data-testid="full-sync-button"
+                  >
+                    {manualSyncMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Full Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <Database className="w-4 h-4 mr-2" />
+                        Full Sync (All Events)
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {!syncStatus?.isAuthenticated && (
+                  <Alert className="border-orange-200 bg-orange-50">
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
+                    <AlertDescription className="text-orange-800">
+                      Calendar authentication required to enable manual sync
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Enhanced Sync Statistics */}
+            <Card data-testid="sync-statistics">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <TrendingUp className="w-5 h-5" />
+                  <span>Sync Statistics</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="text-center p-3 bg-muted/50 rounded-lg">
+                  <div className="text-center p-3 bg-blue-50 rounded-lg">
                     <div className="text-lg font-semibold text-blue-600">
-                      {calendarStatus?.eventsProcessed || 0}
+                      {syncStatus?.statistics?.totalSyncs || 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Total Syncs</div>
+                  </div>
+                  <div className="text-center p-3 bg-green-50 rounded-lg">
+                    <div className="text-lg font-semibold text-green-600">
+                      {syncStatus?.statistics?.successfulSyncs || 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Successful</div>
+                  </div>
+                  <div className="text-center p-3 bg-purple-50 rounded-lg">
+                    <div className="text-lg font-semibold text-purple-600">
+                      {syncStatus?.statistics?.totalEventsProcessed || 0}
                     </div>
                     <div className="text-xs text-muted-foreground">Events Processed</div>
                   </div>
-                  <div className="text-center p-3 bg-muted/50 rounded-lg">
-                    <div className="text-lg font-semibold text-green-600">
-                      {calendarStatus?.matchesFound || 0}
+                  <div className="text-center p-3 bg-emerald-50 rounded-lg">
+                    <div className="text-lg font-semibold text-emerald-600">
+                      {syncStatus?.statistics?.totalEventsMatched || 0}
                     </div>
-                    <div className="text-xs text-muted-foreground">Matches Found</div>
-                  </div>
-                  <div className="text-center p-3 bg-muted/50 rounded-lg">
-                    <div className="text-lg font-semibold text-purple-600">
-                      {calendarStatus?.quotaUsed || 0}
-                    </div>
-                    <div className="text-xs text-muted-foreground">API Quota Used</div>
-                  </div>
-                  <div className="text-center p-3 bg-muted/50 rounded-lg">
-                    <div className="text-lg font-semibold text-orange-600">
-                      {calendarStatus?.rateLimitRemaining || '∞'}
-                    </div>
-                    <div className="text-xs text-muted-foreground">Rate Limit</div>
+                    <div className="text-xs text-muted-foreground">Events Matched</div>
                   </div>
                 </div>
 
-                <Separator />
+                {syncStatus?.statistics?.avgProcessingTime && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Avg Processing Time:</span>
+                        <span className="font-medium">
+                          {Math.round(syncStatus.statistics.avgProcessingTime / 1000)}s
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Failed Syncs:</span>
+                        <span className={`font-medium ${syncStatus.statistics.failedSyncs > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {syncStatus.statistics.failedSyncs || 0}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
 
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Last Sync:</span>
-                    <span className="font-medium">
-                      {calendarStatus?.lastSync ? 
-                        new Date(calendarStatus.lastSync).toLocaleString() : 
-                        'Never'
-                      }
-                    </span>
+            {/* Running Syncs & Recent Activity */}
+            <Card data-testid="sync-activity">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Activity className="w-5 h-5" />
+                  <span>Recent Activity</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {syncStatus?.runningSyncs?.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">Running Syncs</h4>
+                    {syncStatus.runningSyncs.map((sync: any) => (
+                      <div key={sync.id} className="p-2 bg-yellow-50 rounded-lg border border-yellow-200">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-yellow-800">
+                            {sync.syncType} sync
+                          </span>
+                          <Badge variant="outline" className="text-xs bg-yellow-100">
+                            {sync.triggerSource}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-yellow-700 mt-1">
+                          Started: {new Date(sync.startTime).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Sync Type:</span>
-                    <Badge variant="outline" className="text-xs">
-                      {calendarStatus?.syncType || 'Full'}
-                    </Badge>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Errors:</span>
-                    <span className={`font-medium ${calendarStatus?.errors?.length ? 'text-red-600' : 'text-green-600'}`}>
-                      {calendarStatus?.errors?.length || 0}
-                    </span>
+                )}
+
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Recent History</h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {syncStatus?.recentHistory?.slice(0, 5).map((sync: any) => (
+                      <div key={sync.id} className="p-2 bg-muted/30 rounded-lg">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center space-x-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                              sync.status === 'completed' ? 'bg-green-500' :
+                              sync.status === 'failed' ? 'bg-red-500' :
+                              'bg-yellow-500'
+                            }`}></div>
+                            <span className="text-sm font-medium">
+                              {sync.syncType} sync
+                            </span>
+                          </div>
+                          <Badge 
+                            variant={sync.status === 'completed' ? 'outline' : 'destructive'}
+                            className="text-xs"
+                          >
+                            {sync.status}
+                          </Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          <div>{new Date(sync.startTime).toLocaleString()}</div>
+                          {sync.eventsTotal > 0 && (
+                            <div>{sync.eventsTotal} events, {sync.eventsMatched} matched</div>
+                          )}
+                          {sync.processingTimeMs && (
+                            <div>Duration: {Math.round(sync.processingTimeMs / 1000)}s</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {(!syncStatus?.recentHistory || syncStatus.recentHistory.length === 0) && (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No recent sync activity
+                      </p>
+                    )}
                   </div>
                 </div>
               </CardContent>

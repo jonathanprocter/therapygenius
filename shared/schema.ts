@@ -158,10 +158,37 @@ export const treatmentPlans = pgTable("treatment_plans", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Calendar Sync History table - Detailed tracking of sync operations and outcomes
+export const calendarSyncHistory = pgTable("calendar_sync_history", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  therapistId: uuid("therapist_id").notNull().references(() => users.id),
+  syncType: varchar("sync_type", { length: 20 }).notNull(), // manual, automatic, incremental, full
+  status: varchar("status", { length: 20 }).notNull(), // running, completed, failed, cancelled
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time"),
+  processingTimeMs: integer("processing_time_ms"),
+  eventsTotal: integer("events_total").default(0),
+  eventsMatched: integer("events_matched").default(0),
+  eventsRejected: integer("events_rejected").default(0),
+  eventsError: integer("events_error").default(0),
+  sessionsCreated: integer("sessions_created").default(0),
+  sessionsUpdated: integer("sessions_updated").default(0),
+  errors: jsonb("errors"), // Array of error details
+  syncDetails: jsonb("sync_details"), // Detailed sync metadata
+  apiCalls: integer("api_calls").default(0),
+  rateLimitRemaining: integer("rate_limit_remaining"),
+  nextSyncToken: text("next_sync_token"), // For incremental syncs
+  triggerSource: varchar("trigger_source", { length: 50 }), // user_manual, scheduled, api_webhook
+  calendarIds: jsonb("calendar_ids"), // Array of calendar IDs synced
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Calendar Event Reviews table - Manual review system for rejected calendar events
 export const calendarEventReviews = pgTable("calendar_event_reviews", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   therapistId: uuid("therapist_id").notNull().references(() => users.id),
+  syncHistoryId: uuid("sync_history_id").references(() => calendarSyncHistory.id), // Link to sync operation
   eventId: text("event_id").notNull(), // Google Calendar event ID
   eventTitle: varchar("event_title", { length: 255 }).notNull(),
   eventDate: timestamp("event_date").notNull(),
@@ -184,6 +211,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   assessments: many(assessments),
   treatmentPlans: many(treatmentPlans),
+  calendarSyncHistory: many(calendarSyncHistory),
   calendarEventReviews: many(calendarEventReviews),
 }));
 
@@ -248,6 +276,14 @@ export const treatmentPlansRelations = relations(treatmentPlans, ({ one }) => ({
   }),
 }));
 
+export const calendarSyncHistoryRelations = relations(calendarSyncHistory, ({ one, many }) => ({
+  therapist: one(users, {
+    fields: [calendarSyncHistory.therapistId],
+    references: [users.id],
+  }),
+  eventReviews: many(calendarEventReviews),
+}));
+
 export const calendarEventReviewsRelations = relations(calendarEventReviews, ({ one }) => ({
   therapist: one(users, {
     fields: [calendarEventReviews.therapistId],
@@ -256,6 +292,10 @@ export const calendarEventReviewsRelations = relations(calendarEventReviews, ({ 
   suggestedClient: one(clients, {
     fields: [calendarEventReviews.suggestedClientId],
     references: [clients.id],
+  }),
+  syncHistory: one(calendarSyncHistory, {
+    fields: [calendarEventReviews.syncHistoryId],
+    references: [calendarSyncHistory.id],
   }),
 }));
 
@@ -310,6 +350,12 @@ export const insertTreatmentPlanSchema = createInsertSchema(treatmentPlans).omit
   updatedAt: true,
 });
 
+export const insertCalendarSyncHistorySchema = createInsertSchema(calendarSyncHistory).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCalendarEventReviewSchema = createInsertSchema(calendarEventReviews).omit({
   id: true,
   createdAt: true,
@@ -340,6 +386,9 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 
 export type RateLimitCounter = typeof rateLimitCounters.$inferSelect;
 export type InsertRateLimitCounter = z.infer<typeof insertRateLimitCounterSchema>;
+
+export type CalendarSyncHistory = typeof calendarSyncHistory.$inferSelect;
+export type InsertCalendarSyncHistory = z.infer<typeof insertCalendarSyncHistorySchema>;
 
 export type CalendarEventReview = typeof calendarEventReviews.$inferSelect;
 export type InsertCalendarEventReview = z.infer<typeof insertCalendarEventReviewSchema>;

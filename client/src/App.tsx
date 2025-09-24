@@ -14,6 +14,7 @@ import SessionDetail from "@/pages/session-detail";
 import Documents from "@/pages/documents";
 import Clients from "@/pages/clients";
 import CalendarSettings from "@/pages/calendar-settings";
+import CalendarSyncDashboard from "@/pages/calendar-sync-dashboard";
 import NotFound from "@/pages/not-found";
 import Reports from "@/pages/reports";
 import Assessments from "@/pages/assessments";
@@ -102,6 +103,7 @@ function MobileNavigation({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
     { path: "/", icon: "fas fa-chart-line", label: "Dashboard" },
     { path: "/clients", icon: "fas fa-users", label: "Clients" },
     { path: "/calendar/settings", icon: "fas fa-calendar-alt", label: "Calendar Sync" },
+    { path: "/calendar/sync-dashboard", icon: "fas fa-analytics", label: "Sync Dashboard" },
     { path: "/calendar/reviews", icon: "fas fa-exclamation-triangle", label: "Calendar Reviews" },
     { path: "/documents", icon: "fas fa-file-medical", label: "Documents" },
     { path: "/assessments", icon: "fas fa-clipboard-list", label: "Assessments" },
@@ -238,6 +240,7 @@ function MainApp() {
             <Route path="/documents" component={Documents} />
             <Route path="/clients" component={Clients} />
             <Route path="/calendar/settings" component={CalendarSettings} />
+            <Route path="/calendar/sync-dashboard" component={CalendarSyncDashboard} />
             <Route path="/calendar/reviews" component={CalendarReviews} />
             <Route path="/schedule" component={() => <div>Schedule page coming soon</div>} />
             <Route path="/assessments" component={Assessments} />
