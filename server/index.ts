@@ -51,6 +51,15 @@ import express, { type Request, Response, NextFunction } from "express";
 
   const server = await registerRoutes(app);
 
+  // Start the calendar sync scheduler after routes are registered
+  try {
+    const { syncScheduler } = await import("./calendar-sync");
+    syncScheduler.start();
+    console.log('✅ Calendar Sync Scheduler initialized and started');
+  } catch (error) {
+    console.error('❌ Failed to start Calendar Sync Scheduler:', error);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   Calendar, 
   Settings, 
@@ -27,7 +28,13 @@ import {
   Play,
   Loader2,
   TrendingUp,
-  Activity
+  Activity,
+  Timer,
+  Moon,
+  Sun,
+  Sunrise,
+  Users,
+  AlertCircle
 } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -36,18 +43,20 @@ import { CalendarSync } from '@/components/CalendarSync';
 import { CalendarSyncDashboard } from '@/components/CalendarSyncDashboard';
 
 export default function CalendarSettings() {
-  const [activeTab, setActiveTab] = useState('connection');
-  const [settings, setSettings] = useState({
-    autoSync: true,
-    syncInterval: 30,
-    clientMatching: true,
-    confidenceThreshold: 0.7,
-    hipaaCompliance: true,
-    auditLogging: true,
-    rateLimitBuffer: 100,
-  });
-  
+  const [activeTab, setActiveTab] = useState('sync-frequency');
   const { toast } = useToast();
+
+  // Get sync preferences
+  const { data: syncPreferences, isLoading: preferencesLoading, refetch: refetchPreferences } = useQuery({
+    queryKey: ['/api/calendar/sync-preferences'],
+    refetchInterval: 30000,
+  });
+
+  // Get next sync time information
+  const { data: nextSyncInfo, isLoading: nextSyncLoading } = useQuery({
+    queryKey: ['/api/calendar/next-sync-time'],
+    refetchInterval: 10000, // Update every 10 seconds
+  });
 
   // Get enhanced calendar status with detailed tracking
   const { data: syncStatus, isLoading: statusLoading, refetch: refetchStatus } = useQuery({
@@ -90,35 +99,64 @@ export default function CalendarSettings() {
     },
   });
 
-  // Mock settings mutation (would be real API in production)
-  const saveSettingsMutation = useMutation({
-    mutationFn: async (newSettings: typeof settings) => {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return { success: true, settings: newSettings };
-    },
-    onSuccess: (data) => {
-      setSettings(data.settings);
-      toast({
-        title: "Settings Saved",
-        description: "Calendar sync settings have been updated successfully.",
+  // Update sync preferences mutation
+  const updatePreferencesMutation = useMutation({
+    mutationFn: async (preferences: any) => {
+      return await apiRequest('/api/calendar/sync-preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(preferences)
       });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Sync Preferences Updated",
+        description: "Calendar sync preferences have been updated successfully.",
+      });
+      // Invalidate related queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ['/api/calendar/sync-preferences'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/calendar/next-sync-time'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/calendar/sync-status'] });
     },
     onError: (error) => {
       toast({
         title: "Settings Error",
-        description: error instanceof Error ? error.message : "Failed to save settings",
+        description: error instanceof Error ? error.message : "Failed to save sync preferences",
         variant: "destructive",
       });
     },
   });
 
-  const handleSaveSettings = () => {
-    saveSettingsMutation.mutate(settings);
+  const handlePreferenceChange = (key: string, value: any) => {
+    if (!syncPreferences) return;
+    
+    const updatedPreferences = { ...syncPreferences, [key]: value };
+    updatePreferencesMutation.mutate(updatedPreferences);
   };
 
-  const handleSettingChange = (key: keyof typeof settings, value: any) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
+  // Helper function to format sync interval options
+  const getSyncIntervalOptions = () => [
+    { value: 15, label: '15 minutes', description: 'Very frequent (high API usage)' },
+    { value: 30, label: '30 minutes', description: 'Frequent' },
+    { value: 60, label: '1 hour', description: 'Regular' },
+    { value: 120, label: '2 hours', description: 'Balanced (recommended)' },
+    { value: 240, label: '4 hours', description: 'Less frequent' },
+    { value: 360, label: '6 hours', description: 'Original default' },
+    { value: 720, label: '12 hours', description: 'Infrequent' },
+  ];
+
+  const formatNextSyncTime = (nextSyncTime: string | null) => {
+    if (!nextSyncTime) return 'Not scheduled';
+    
+    const nextSync = new Date(nextSyncTime);
+    const now = new Date();
+    const diffMs = nextSync.getTime() - now.getTime();
+    const diffMinutes = Math.round(diffMs / (1000 * 60));
+    
+    if (diffMinutes <= 0) return 'Due now';
+    if (diffMinutes < 60) return `${diffMinutes} minutes`;
+    if (diffMinutes < 1440) return `${Math.round(diffMinutes / 60)} hours`;
+    return `${Math.round(diffMinutes / 1440)} days`;
   };
 
   return (
@@ -147,19 +185,20 @@ export default function CalendarSettings() {
             {calendarStatus?.isAuthenticated ? 'Connected' : 'Disconnected'}
           </Badge>
           <Button 
-            onClick={handleSaveSettings}
-            disabled={saveSettingsMutation.isPending}
-            data-testid="save-settings"
+            onClick={() => refetchPreferences()}
+            disabled={preferencesLoading}
+            variant="outline"
+            data-testid="refresh-preferences"
           >
-            {saveSettingsMutation.isPending ? (
+            {preferencesLoading ? (
               <>
                 <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Saving...
+                Loading...
               </>
             ) : (
               <>
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Save Settings
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
               </>
             )}
           </Button>
@@ -167,13 +206,318 @@ export default function CalendarSettings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-5" data-testid="settings-tabs">
+        <TabsList className="grid w-full grid-cols-6" data-testid="settings-tabs">
+          <TabsTrigger value="sync-frequency" data-testid="tab-sync-frequency">
+            <Timer className="w-4 h-4 mr-2" />
+            Sync Frequency
+          </TabsTrigger>
           <TabsTrigger value="connection" data-testid="tab-connection">Connection</TabsTrigger>
           <TabsTrigger value="sync" data-testid="tab-sync">Sync Settings</TabsTrigger>
           <TabsTrigger value="ai-matching" data-testid="tab-ai-matching">AI Matching</TabsTrigger>
           <TabsTrigger value="security" data-testid="tab-security">Security</TabsTrigger>
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
         </TabsList>
+
+        {/* Sync Frequency Tab */}
+        <TabsContent value="sync-frequency" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Current Sync Status */}
+            <Card data-testid="current-sync-status">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Clock className="w-5 h-5" />
+                  <span>Current Sync Status</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {nextSyncLoading || preferencesLoading ? (
+                  <div className="flex items-center space-x-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm text-muted-foreground">Loading sync information...</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Next Sync:</span>
+                      <Badge variant="outline" data-testid="next-sync-time">
+                        {formatNextSyncTime(nextSyncInfo?.nextSyncTime)}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Current Interval:</span>
+                      <span className="text-sm text-muted-foreground">
+                        {syncPreferences?.syncIntervalMinutes ? 
+                          `${syncPreferences.syncIntervalMinutes} minutes` : 
+                          '2 hours (default)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Smart Sync:</span>
+                      <Badge variant={syncPreferences?.enableSmartSync ? "default" : "secondary"}>
+                        {syncPreferences?.enableSmartSync ? 'Enabled' : 'Disabled'}
+                      </Badge>
+                    </div>
+                    {nextSyncInfo?.shouldSync && (
+                      <Alert data-testid="sync-ready-alert">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>
+                          Sync is ready to run: {nextSyncInfo.reason}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Basic Sync Interval */}
+            <Card data-testid="sync-interval-settings">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Timer className="w-5 h-5" />
+                  <span>Basic Sync Interval</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="sync-interval">Sync Frequency</Label>
+                  <Select
+                    value={syncPreferences?.syncIntervalMinutes?.toString() || '120'}
+                    onValueChange={(value) => handlePreferenceChange('syncIntervalMinutes', parseInt(value))}
+                    data-testid="sync-interval-select"
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select sync frequency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getSyncIntervalOptions().map((option) => (
+                        <SelectItem key={option.value} value={option.value.toString()}>
+                          <div className="flex flex-col">
+                            <span>{option.label}</span>
+                            <span className="text-xs text-muted-foreground">{option.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    checked={syncPreferences?.enableSmartSync || false}
+                    onCheckedChange={(checked) => handlePreferenceChange('enableSmartSync', checked)}
+                    data-testid="smart-sync-toggle"
+                  />
+                  <Label>Enable Smart Sync</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Smart sync automatically adjusts frequency based on business hours, peak times, and activity
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Smart Scheduling Options */}
+            {syncPreferences?.enableSmartSync && (
+              <>
+                <Card data-testid="business-hours-settings">
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Sun className="w-5 h-5" />
+                      <span>Business Hours</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        checked={syncPreferences?.businessHoursOnly || false}
+                        onCheckedChange={(checked) => handlePreferenceChange('businessHoursOnly', checked)}
+                        data-testid="business-hours-toggle"
+                      />
+                      <Label>Sync only during business hours</Label>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="business-start">Start Time (24hr)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="23"
+                          value={syncPreferences?.businessHoursStart || 8}
+                          onChange={(e) => handlePreferenceChange('businessHoursStart', parseInt(e.target.value))}
+                          data-testid="business-hours-start"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="business-end">End Time (24hr)</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="24"
+                          value={syncPreferences?.businessHoursEnd || 20}
+                          onChange={(e) => handlePreferenceChange('businessHoursEnd', parseInt(e.target.value))}
+                          data-testid="business-hours-end"
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card data-testid="peak-hours-settings">
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Sunrise className="w-5 h-5" />
+                      <span>Peak Hours</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      More frequent syncing during busy therapy hours (weekdays only)
+                    </p>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="peak-start">Peak Start (24hr)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="23"
+                          value={syncPreferences?.peakHoursStart || 9}
+                          onChange={(e) => handlePreferenceChange('peakHoursStart', parseInt(e.target.value))}
+                          data-testid="peak-hours-start"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="peak-end">Peak End (24hr)</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="24"
+                          value={syncPreferences?.peakHoursEnd || 17}
+                          onChange={(e) => handlePreferenceChange('peakHoursEnd', parseInt(e.target.value))}
+                          data-testid="peak-hours-end"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="peak-interval">Peak Hours Interval (minutes)</Label>
+                      <Select
+                        value={syncPreferences?.peakHoursIntervalMinutes?.toString() || '30'}
+                        onValueChange={(value) => handlePreferenceChange('peakHoursIntervalMinutes', parseInt(value))}
+                        data-testid="peak-hours-interval"
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 minutes</SelectItem>
+                          <SelectItem value="30">30 minutes</SelectItem>
+                          <SelectItem value="60">1 hour</SelectItem>
+                          <SelectItem value="120">2 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card data-testid="schedule-intervals">
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Moon className="w-5 h-5" />
+                      <span>Schedule-Based Intervals</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="weekend-interval">Weekend Interval (minutes)</Label>
+                      <Select
+                        value={syncPreferences?.weekendIntervalMinutes?.toString() || '360'}
+                        onValueChange={(value) => handlePreferenceChange('weekendIntervalMinutes', parseInt(value))}
+                        data-testid="weekend-interval"
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="120">2 hours</SelectItem>
+                          <SelectItem value="240">4 hours</SelectItem>
+                          <SelectItem value="360">6 hours</SelectItem>
+                          <SelectItem value="720">12 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="nightly-interval">Nightly/Off-Hours Interval (minutes)</Label>
+                      <Select
+                        value={syncPreferences?.nightlyIntervalMinutes?.toString() || '720'}
+                        onValueChange={(value) => handlePreferenceChange('nightlyIntervalMinutes', parseInt(value))}
+                        data-testid="nightly-interval"
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="240">4 hours</SelectItem>
+                          <SelectItem value="360">6 hours</SelectItem>
+                          <SelectItem value="720">12 hours</SelectItem>
+                          <SelectItem value="1440">24 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        checked={syncPreferences?.activityBasedSync || false}
+                        onCheckedChange={(checked) => handlePreferenceChange('activityBasedSync', checked)}
+                        data-testid="activity-based-toggle"
+                      />
+                      <Label>Activity-based sync</Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Reduce sync frequency when user is inactive for more than 24 hours
+                    </p>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+
+            {/* Performance & Limits */}
+            <Card data-testid="performance-limits">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Server className="w-5 h-5" />
+                  <span>Performance & API Limits</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="api-limit">Daily API Calls Limit</Label>
+                  <Input
+                    type="number"
+                    min="50"
+                    max="10000"
+                    value={syncPreferences?.maxDailyApiCalls || 500}
+                    onChange={(e) => handlePreferenceChange('maxDailyApiCalls', parseInt(e.target.value))}
+                    data-testid="api-calls-limit"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Conservative limit to stay within Google Calendar API quotas (50-10000)
+                  </p>
+                </div>
+                
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    Higher sync frequencies use more API calls. Monitor your usage to avoid hitting limits.
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
         {/* Connection Tab */}
         <TabsContent value="connection" className="space-y-6">

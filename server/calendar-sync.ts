@@ -5,6 +5,111 @@ import { aiRouter } from './ai';
 import { encryptionService, EncryptionAuditLogger } from './encryption';
 import { z } from 'zod';
 
+// Background sync scheduler for managing per-user sync schedules
+class CalendarSyncScheduler {
+  private schedulerInterval: NodeJS.Timeout | null = null;
+  private isRunning: boolean = false;
+  private readonly SCHEDULER_CHECK_INTERVAL = 2 * 60 * 1000; // Check every 2 minutes
+  private readonly MAX_CONCURRENT_SYNCS = 3; // Limit concurrent syncs to prevent overwhelming the system
+  private activeSyncs = new Set<string>();
+
+  start() {
+    if (this.isRunning) return;
+    
+    this.isRunning = true;
+    console.log('🔄 Calendar Sync Scheduler started - checking for due syncs every 2 minutes');
+    
+    // Immediate first check
+    this.checkAndExecuteScheduledSyncs();
+    
+    // Set up periodic checks
+    this.schedulerInterval = setInterval(() => {
+      this.checkAndExecuteScheduledSyncs();
+    }, this.SCHEDULER_CHECK_INTERVAL);
+  }
+
+  stop() {
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
+      this.schedulerInterval = null;
+    }
+    this.isRunning = false;
+    console.log('⏹️ Calendar Sync Scheduler stopped');
+  }
+
+  private async checkAndExecuteScheduledSyncs() {
+    try {
+      // For now, we only have one therapist (THERAPIST_ID)
+      // In a multi-tenant system, this would query all active users
+      const THERAPIST_ID = "59ea3867-0b4f-47b6-8a95-6484c4a52ef7";
+      
+      if (this.activeSyncs.has(THERAPIST_ID)) {
+        console.log(`⏭️ Sync already in progress for ${THERAPIST_ID}, skipping`);
+        return;
+      }
+
+      // Check if this user needs syncing
+      const shouldSyncInfo = await storage.shouldSync(THERAPIST_ID);
+      
+      if (shouldSyncInfo.shouldSync) {
+        console.log(`📅 Triggering scheduled sync for ${THERAPIST_ID}: ${shouldSyncInfo.reason}`);
+        await this.executeScheduledSync(THERAPIST_ID);
+      } else {
+        const nextSyncTime = shouldSyncInfo.nextSyncTime;
+        if (nextSyncTime) {
+          const timeUntilNext = nextSyncTime.getTime() - new Date().getTime();
+          const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
+          console.log(`⏰ Next sync for ${THERAPIST_ID} in ${minutesUntilNext} minutes (${shouldSyncInfo.reason})`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in scheduled sync checker:', error);
+    }
+  }
+
+  private async executeScheduledSync(therapistId: string) {
+    if (this.activeSyncs.size >= this.MAX_CONCURRENT_SYNCS) {
+      console.log(`⚠️ Maximum concurrent syncs reached (${this.MAX_CONCURRENT_SYNCS}), deferring sync for ${therapistId}`);
+      return;
+    }
+
+    this.activeSyncs.add(therapistId);
+    
+    try {
+      console.log(`🚀 Starting automatic sync for ${therapistId}`);
+      // Use the calendarSync instance that will be available after this module loads
+      const syncResult = await calendarSync.syncCalendarWithDetailedTracking(
+        therapistId, 
+        'system_scheduled', 
+        false // not a force full sync
+      );
+      
+      if (syncResult.success) {
+        console.log(`✅ Scheduled sync completed for ${therapistId} in ${Math.round(syncResult.processingTimeMs / 1000)}s - Events: ${syncResult.eventsTotal}, Sessions: ${syncResult.sessionsCreated + syncResult.sessionsUpdated}`);
+      } else {
+        console.log(`❌ Scheduled sync failed for ${therapistId}: ${syncResult.errors.join(', ')}`);
+      }
+    } catch (error) {
+      console.error(`💥 Error during scheduled sync for ${therapistId}:`, error);
+    } finally {
+      this.activeSyncs.delete(therapistId);
+    }
+  }
+
+  // Get scheduler status for API/debugging
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      checkIntervalMs: this.SCHEDULER_CHECK_INTERVAL,
+      activeSyncs: Array.from(this.activeSyncs),
+      maxConcurrentSyncs: this.MAX_CONCURRENT_SYNCS,
+    };
+  }
+}
+
+// Global scheduler instance
+export const syncScheduler = new CalendarSyncScheduler();
+
 // Import therapist ID constant for audit logging
 const THERAPIST_ID = "59ea3867-0b4f-47b6-8a95-6484c4a52ef7";
 
@@ -254,7 +359,7 @@ class CalendarSyncService {
         eventsProcessed: stats.eventsProcessed || 0,
         matchesFound: stats.matchesFound || 0,
         errors: stats.errors || [],
-        nextSync: this.calculateNextSync(lastSync || undefined),
+        nextSync: await this.calculateNextSync(therapistId, lastSync || undefined),
         syncType: 'full'
       };
     } catch (error) {
@@ -464,7 +569,7 @@ class CalendarSyncService {
       }
 
       // PRODUCTION: Rate limiting check
-      if (!this.checkRateLimit(therapistId)) {
+      if (!(await this.checkRateLimit(therapistId))) {
         throw new Error('Rate limit exceeded - please wait before next sync');
       }
 
@@ -562,7 +667,7 @@ class CalendarSyncService {
         eventsProcessed,
         matchesFound,
         errors,
-        nextSync: this.calculateNextSync(startTime),
+        nextSync: await this.calculateNextSync(therapistId, startTime),
         syncType,
         syncToken: nextSyncToken,
         rateLimitRemaining,
@@ -1794,19 +1899,70 @@ If no confident match found, respond with: {"match": false}
   /**
    * Calculate next sync time (adaptive based on failures)
    */
-  private calculateNextSync(lastSync?: Date): Date {
+  private async calculateNextSync(therapistId: string, lastSync?: Date): Promise<Date> {
     const now = new Date();
-    const baseInterval = 6 * 60 * 60 * 1000; // 6 hours
     
-    // Adaptive interval based on recent failures
-    const therapistFailures = Array.from(this.circuitBreakerState.values())
-      .reduce((sum, state) => sum + state.failures, 0);
+    // Get user sync preferences from storage
+    const preferences = await storage.getSyncPreferences(therapistId);
+    if (!preferences) {
+      // Fallback to default 2-hour interval (more reasonable than 6 hours)
+      const defaultInterval = 2 * 60 * 60 * 1000; // 2 hours default
+      return new Date(now.getTime() + defaultInterval);
+    }
+
+    let baseIntervalMs: number;
+
+    // Use smart scheduling if enabled
+    if (preferences.enableSmartSync) {
+      baseIntervalMs = this.calculateSmartInterval(preferences, now) * 60 * 1000; // Convert minutes to milliseconds
+    } else {
+      baseIntervalMs = preferences.syncIntervalMinutes * 60 * 1000; // Convert minutes to milliseconds
+    }
     
-    const multiplier = Math.min(1 + (therapistFailures * 0.5), 4); // Max 4x interval
-    const nextSync = new Date(now.getTime() + (baseInterval * multiplier));
+    // Adaptive interval based on recent failures (but cap it to prevent excessive delays)
+    const circuitBreakerState = this.circuitBreakerState.get(therapistId);
+    const failures = circuitBreakerState?.failures || 0;
     
-    console.log(`[Calendar Sync] [PRODUCTION] Next sync scheduled in ${Math.round(baseInterval * multiplier / (1000 * 60 * 60))} hours`);
+    const multiplier = Math.min(1 + (failures * 0.3), 3); // Max 3x interval (reduced from 4x)
+    const finalIntervalMs = baseIntervalMs * multiplier;
+    
+    const nextSync = new Date(now.getTime() + finalIntervalMs);
+    
+    const hours = Math.round(finalIntervalMs / (1000 * 60 * 60) * 10) / 10; // Round to 1 decimal
+    console.log(`[Calendar Sync] [CONFIGURABLE] Next sync scheduled in ${hours} hours for therapist ${therapistId} (Smart Sync: ${preferences.enableSmartSync})`);
+    
     return nextSync;
+  }
+
+  private calculateSmartInterval(preferences: any, now: Date): number {
+    const currentHour = now.getHours();
+    const currentDay = now.getDay(); // 0 = Sunday, 6 = Saturday
+    const isWeekend = currentDay === 0 || currentDay === 6;
+
+    // Business hours only restriction
+    if (preferences.businessHoursOnly) {
+      if (currentHour < preferences.businessHoursStart || currentHour >= preferences.businessHoursEnd) {
+        return preferences.nightlyIntervalMinutes;
+      }
+    }
+
+    // Peak hours (more frequent syncing during busy therapy times)
+    if (currentHour >= preferences.peakHoursStart && currentHour < preferences.peakHoursEnd && !isWeekend) {
+      return preferences.peakHoursIntervalMinutes;
+    }
+
+    // Weekend scheduling (reduced frequency)
+    if (isWeekend) {
+      return preferences.weekendIntervalMinutes;
+    }
+
+    // Outside business hours but not restricted to business hours only
+    if (currentHour < preferences.businessHoursStart || currentHour >= preferences.businessHoursEnd) {
+      return preferences.nightlyIntervalMinutes;
+    }
+
+    // Regular business hours
+    return preferences.syncIntervalMinutes;
   }
 
   /**
@@ -1869,9 +2025,14 @@ If no confident match found, respond with: {"match": false}
   /**
    * PRODUCTION: Rate limiting implementation
    */
-  private checkRateLimit(therapistId: string): boolean {
+  private async checkRateLimit(therapistId: string): Promise<boolean> {
     const now = new Date();
     const counter = this.rateLimitCounters.get(therapistId);
+    
+    // Get user's API call preferences
+    const preferences = await storage.getSyncPreferences(therapistId);
+    const maxDailyApiCalls = preferences?.maxDailyApiCalls || 500; // Conservative default
+    const maxRequestsPerHour = Math.min(Math.floor(maxDailyApiCalls / 24), parseInt(process.env.MAX_SYNC_REQUESTS_PER_HOUR || '20')); // Distribute daily limit across hours
     
     if (!counter || now > counter.resetTime) {
       // Reset counter every hour
@@ -1882,10 +2043,9 @@ If no confident match found, respond with: {"match": false}
       return true;
     }
     
-    const maxRequestsPerHour = parseInt(process.env.MAX_SYNC_REQUESTS_PER_HOUR || '10');
     if (counter.requests >= maxRequestsPerHour) {
-      console.warn(`[Calendar Sync] [PRODUCTION] Rate limit exceeded for therapist ${therapistId}: ${counter.requests}/${maxRequestsPerHour}`);
-      this.logAuditEvent('rate_limit_exceeded', therapistId, false, `Requests: ${counter.requests}/${maxRequestsPerHour}`);
+      console.warn(`[Calendar Sync] [CONFIGURABLE] Rate limit exceeded for therapist ${therapistId}: ${counter.requests}/${maxRequestsPerHour} (Daily limit: ${maxDailyApiCalls})`);
+      this.logAuditEvent('rate_limit_exceeded', therapistId, false, `Requests: ${counter.requests}/${maxRequestsPerHour}, Daily: ${maxDailyApiCalls}`);
       return false;
     }
     

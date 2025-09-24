@@ -1181,6 +1181,159 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Calendar Sync Preferences routes - Configurable sync frequency
+  app.get("/api/calendar/sync-preferences", async (req: Request, res) => {
+    try {
+      const preferences = await storage.getSyncPreferences(THERAPIST_ID);
+      
+      if (!preferences) {
+        // Return default preferences if none exist
+        const defaultPreferences = {
+          syncIntervalMinutes: 120, // 2 hours default (more reasonable than 6 hours)
+          enableSmartSync: true,
+          businessHoursOnly: false,
+          businessHoursStart: 8,
+          businessHoursEnd: 20,
+          peakHoursStart: 9,
+          peakHoursEnd: 17,
+          peakHoursIntervalMinutes: 30,
+          weekendIntervalMinutes: 360,
+          nightlyIntervalMinutes: 720,
+          activityBasedSync: false,
+          lastUserActivity: null,
+          maxDailyApiCalls: 500,
+          smartSyncSettings: null
+        };
+        res.json(defaultPreferences);
+      } else {
+        res.json(preferences);
+      }
+    } catch (error) {
+      console.error("Error fetching sync preferences:", error);
+      res.status(500).json({ message: "Failed to fetch sync preferences" });
+    }
+  });
+
+  app.put("/api/calendar/sync-preferences", async (req: Request, res) => {
+    try {
+      const {
+        syncIntervalMinutes,
+        enableSmartSync,
+        businessHoursOnly,
+        businessHoursStart,
+        businessHoursEnd,
+        peakHoursStart,
+        peakHoursEnd,
+        peakHoursIntervalMinutes,
+        weekendIntervalMinutes,
+        nightlyIntervalMinutes,
+        activityBasedSync,
+        maxDailyApiCalls,
+        smartSyncSettings
+      } = req.body;
+
+      // Validate input ranges
+      if (syncIntervalMinutes && (syncIntervalMinutes < 15 || syncIntervalMinutes > 1440)) { // 15 min to 24 hours
+        return res.status(400).json({ message: "Sync interval must be between 15 minutes and 24 hours" });
+      }
+
+      if (businessHoursStart && (businessHoursStart < 0 || businessHoursStart > 23)) {
+        return res.status(400).json({ message: "Business hours start must be between 0 and 23" });
+      }
+
+      if (businessHoursEnd && (businessHoursEnd < 1 || businessHoursEnd > 24)) {
+        return res.status(400).json({ message: "Business hours end must be between 1 and 24" });
+      }
+
+      if (maxDailyApiCalls && (maxDailyApiCalls < 50 || maxDailyApiCalls > 10000)) {
+        return res.status(400).json({ message: "Daily API calls limit must be between 50 and 10000" });
+      }
+
+      const success = await storage.updateSyncPreferences(THERAPIST_ID, {
+        syncIntervalMinutes,
+        enableSmartSync,
+        businessHoursOnly,
+        businessHoursStart,
+        businessHoursEnd,
+        peakHoursStart,
+        peakHoursEnd,
+        peakHoursIntervalMinutes,
+        weekendIntervalMinutes,
+        nightlyIntervalMinutes,
+        activityBasedSync,
+        maxDailyApiCalls,
+        smartSyncSettings
+      });
+
+      if (!success) {
+        return res.status(500).json({ message: "Failed to update sync preferences" });
+      }
+
+      // Update user activity timestamp
+      await storage.updateUserActivity(THERAPIST_ID);
+
+      res.json({ 
+        message: "Sync preferences updated successfully",
+        success: true 
+      });
+    } catch (error) {
+      console.error("Error updating sync preferences:", error);
+      res.status(500).json({ message: "Failed to update sync preferences" });
+    }
+  });
+
+  // Get next scheduled sync time based on user preferences
+  app.get("/api/calendar/next-sync-time", async (req: Request, res) => {
+    try {
+      const nextSyncTime = await storage.getNextSyncTime(THERAPIST_ID);
+      const shouldSyncInfo = await storage.shouldSync(THERAPIST_ID);
+      
+      res.json({
+        nextSyncTime,
+        shouldSync: shouldSyncInfo.shouldSync,
+        reason: shouldSyncInfo.reason,
+        currentTime: new Date()
+      });
+    } catch (error) {
+      console.error("Error getting next sync time:", error);
+      res.status(500).json({ message: "Failed to get next sync time" });
+    }
+  });
+
+  // Scheduler Status and Control routes
+  app.get("/api/calendar/scheduler/status", async (req: Request, res) => {
+    try {
+      const { syncScheduler } = await import("./calendar-sync");
+      const status = syncScheduler.getStatus();
+      res.json(status);
+    } catch (error) {
+      console.error("Error getting scheduler status:", error);
+      res.status(500).json({ message: "Failed to get scheduler status" });
+    }
+  });
+
+  app.post("/api/calendar/scheduler/stop", async (req: Request, res) => {
+    try {
+      const { syncScheduler } = await import("./calendar-sync");
+      syncScheduler.stop();
+      res.json({ message: "Scheduler stopped successfully", success: true });
+    } catch (error) {
+      console.error("Error stopping scheduler:", error);
+      res.status(500).json({ message: "Failed to stop scheduler" });
+    }
+  });
+
+  app.post("/api/calendar/scheduler/start", async (req: Request, res) => {
+    try {
+      const { syncScheduler } = await import("./calendar-sync");
+      syncScheduler.start();
+      res.json({ message: "Scheduler started successfully", success: true });
+    } catch (error) {
+      console.error("Error starting scheduler:", error);
+      res.status(500).json({ message: "Failed to start scheduler" });
+    }
+  });
+
   app.post("/api/calendar/test-alias", async (req: Request, res) => {
     try {
       const { pattern, matchType, testText } = req.body;

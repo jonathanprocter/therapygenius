@@ -118,6 +118,42 @@ export interface IStorage {
   }): Promise<void>;
   getSessionByExternalEventId(externalEventId: string, therapistId: string): Promise<Session | null>;
   
+  // Calendar Sync Preferences methods - Configurable sync frequency
+  getSyncPreferences(therapistId: string): Promise<{
+    syncIntervalMinutes: number;
+    enableSmartSync: boolean;
+    businessHoursOnly: boolean;
+    businessHoursStart: number;
+    businessHoursEnd: number;
+    peakHoursStart: number;
+    peakHoursEnd: number;
+    peakHoursIntervalMinutes: number;
+    weekendIntervalMinutes: number;
+    nightlyIntervalMinutes: number;
+    activityBasedSync: boolean;
+    lastUserActivity: Date | null;
+    maxDailyApiCalls: number;
+    smartSyncSettings: any;
+  } | null>;
+  updateSyncPreferences(therapistId: string, preferences: {
+    syncIntervalMinutes?: number;
+    enableSmartSync?: boolean;
+    businessHoursOnly?: boolean;
+    businessHoursStart?: number;
+    businessHoursEnd?: number;
+    peakHoursStart?: number;
+    peakHoursEnd?: number;
+    peakHoursIntervalMinutes?: number;
+    weekendIntervalMinutes?: number;
+    nightlyIntervalMinutes?: number;
+    activityBasedSync?: boolean;
+    maxDailyApiCalls?: number;
+    smartSyncSettings?: any;
+  }): Promise<boolean>;
+  updateUserActivity(therapistId: string): Promise<boolean>;
+  getNextSyncTime(therapistId: string): Promise<Date | null>;
+  shouldSync(therapistId: string): Promise<{ shouldSync: boolean; reason: string; nextSyncTime: Date | null }>;
+  
   // Calendar Sync History methods - Detailed sync outcome tracking
   createCalendarSyncHistory(syncHistory: InsertCalendarSyncHistory): Promise<CalendarSyncHistory>;
   updateCalendarSyncHistory(id: string, updates: Partial<CalendarSyncHistory>, therapistId: string): Promise<CalendarSyncHistory | null>;
@@ -758,6 +794,176 @@ export class DatabaseStorage implements IStorage {
       );
 
     return session || null;
+  }
+
+  // Calendar Sync Preferences implementations - Configurable sync frequency
+  async getSyncPreferences(therapistId: string): Promise<{
+    syncIntervalMinutes: number;
+    enableSmartSync: boolean;
+    businessHoursOnly: boolean;
+    businessHoursStart: number;
+    businessHoursEnd: number;
+    peakHoursStart: number;
+    peakHoursEnd: number;
+    peakHoursIntervalMinutes: number;
+    weekendIntervalMinutes: number;
+    nightlyIntervalMinutes: number;
+    activityBasedSync: boolean;
+    lastUserActivity: Date | null;
+    maxDailyApiCalls: number;
+    smartSyncSettings: any;
+  } | null> {
+    const [user] = await db
+      .select({
+        syncIntervalMinutes: users.syncIntervalMinutes,
+        enableSmartSync: users.enableSmartSync,
+        businessHoursOnly: users.businessHoursOnly,
+        businessHoursStart: users.businessHoursStart,
+        businessHoursEnd: users.businessHoursEnd,
+        peakHoursStart: users.peakHoursStart,
+        peakHoursEnd: users.peakHoursEnd,
+        peakHoursIntervalMinutes: users.peakHoursIntervalMinutes,
+        weekendIntervalMinutes: users.weekendIntervalMinutes,
+        nightlyIntervalMinutes: users.nightlyIntervalMinutes,
+        activityBasedSync: users.activityBasedSync,
+        lastUserActivity: users.lastUserActivity,
+        maxDailyApiCalls: users.maxDailyApiCalls,
+        smartSyncSettings: users.smartSyncSettings,
+      })
+      .from(users)
+      .where(eq(users.id, therapistId));
+
+    return user || null;
+  }
+
+  async updateSyncPreferences(therapistId: string, preferences: {
+    syncIntervalMinutes?: number;
+    enableSmartSync?: boolean;
+    businessHoursOnly?: boolean;
+    businessHoursStart?: number;
+    businessHoursEnd?: number;
+    peakHoursStart?: number;
+    peakHoursEnd?: number;
+    peakHoursIntervalMinutes?: number;
+    weekendIntervalMinutes?: number;
+    nightlyIntervalMinutes?: number;
+    activityBasedSync?: boolean;
+    maxDailyApiCalls?: number;
+    smartSyncSettings?: any;
+  }): Promise<boolean> {
+    try {
+      const result = await db
+        .update(users)
+        .set({
+          ...preferences,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, therapistId));
+      
+      return (result.rowCount ?? 0) > 0;
+    } catch (error) {
+      console.error('[Storage] Failed to update sync preferences:', error);
+      return false;
+    }
+  }
+
+  async updateUserActivity(therapistId: string): Promise<boolean> {
+    try {
+      const result = await db
+        .update(users)
+        .set({
+          lastUserActivity: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, therapistId));
+      
+      return (result.rowCount ?? 0) > 0;
+    } catch (error) {
+      console.error('[Storage] Failed to update user activity:', error);
+      return false;
+    }
+  }
+
+  async getNextSyncTime(therapistId: string): Promise<Date | null> {
+    const preferences = await this.getSyncPreferences(therapistId);
+    if (!preferences) return null;
+
+    const lastSync = await this.getLastSyncTime(therapistId);
+    const now = new Date();
+    
+    if (!lastSync) {
+      // If never synced, schedule next sync immediately
+      return now;
+    }
+
+    // Calculate next sync time based on smart scheduling
+    if (preferences.enableSmartSync) {
+      return this.calculateSmartSyncTime(preferences, lastSync, now);
+    } else {
+      // Simple interval-based sync
+      return new Date(lastSync.getTime() + (preferences.syncIntervalMinutes * 60 * 1000));
+    }
+  }
+
+  async shouldSync(therapistId: string): Promise<{ shouldSync: boolean; reason: string; nextSyncTime: Date | null }> {
+    const preferences = await this.getSyncPreferences(therapistId);
+    if (!preferences) {
+      return { shouldSync: false, reason: 'No sync preferences found', nextSyncTime: null };
+    }
+
+    const nextSyncTime = await this.getNextSyncTime(therapistId);
+    if (!nextSyncTime) {
+      return { shouldSync: false, reason: 'Unable to calculate next sync time', nextSyncTime: null };
+    }
+
+    const now = new Date();
+    const shouldSync = now >= nextSyncTime;
+
+    let reason = shouldSync ? 'Scheduled sync time reached' : 'Not yet time for sync';
+
+    // Additional checks for smart sync
+    if (preferences.enableSmartSync) {
+      // Check business hours restriction
+      if (preferences.businessHoursOnly) {
+        const currentHour = now.getHours();
+        if (currentHour < preferences.businessHoursStart || currentHour >= preferences.businessHoursEnd) {
+          return { shouldSync: false, reason: 'Outside business hours', nextSyncTime };
+        }
+      }
+
+      // Check activity-based sync
+      if (preferences.activityBasedSync && preferences.lastUserActivity) {
+        const hoursSinceActivity = (now.getTime() - preferences.lastUserActivity.getTime()) / (1000 * 60 * 60);
+        if (hoursSinceActivity > 24) {
+          reason = shouldSync ? 'User inactive, reduced sync frequency' : 'User inactive, sync delayed';
+        }
+      }
+    }
+
+    return { shouldSync, reason, nextSyncTime };
+  }
+
+  private calculateSmartSyncTime(preferences: any, lastSync: Date, now: Date): Date {
+    const currentHour = now.getHours();
+    const currentDay = now.getDay(); // 0 = Sunday, 6 = Saturday
+    const isWeekend = currentDay === 0 || currentDay === 6;
+    
+    let intervalMinutes = preferences.syncIntervalMinutes;
+
+    // Apply peak hours interval during business peak times
+    if (currentHour >= preferences.peakHoursStart && currentHour < preferences.peakHoursEnd && !isWeekend) {
+      intervalMinutes = preferences.peakHoursIntervalMinutes;
+    }
+    // Apply weekend interval
+    else if (isWeekend) {
+      intervalMinutes = preferences.weekendIntervalMinutes;
+    }
+    // Apply nightly interval (outside business hours)
+    else if (currentHour < preferences.businessHoursStart || currentHour >= preferences.businessHoursEnd) {
+      intervalMinutes = preferences.nightlyIntervalMinutes;
+    }
+
+    return new Date(lastSync.getTime() + (intervalMinutes * 60 * 1000));
   }
 
   // Calendar Event Review implementations - Manual review system for rejected calendar events

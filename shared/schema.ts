@@ -28,6 +28,21 @@ export const users = pgTable("users", {
   // Calendar sync tracking
   lastCalendarSync: timestamp("last_calendar_sync"),
   calendarSyncStats: jsonb("calendar_sync_stats"),
+  // Calendar sync preferences - configurable sync frequency
+  syncIntervalMinutes: integer("sync_interval_minutes").default(120), // Default to 2 hours instead of 6 hours
+  enableSmartSync: boolean("enable_smart_sync").default(true),
+  businessHoursOnly: boolean("business_hours_only").default(false),
+  businessHoursStart: integer("business_hours_start").default(8), // 8 AM
+  businessHoursEnd: integer("business_hours_end").default(20), // 8 PM
+  peakHoursStart: integer("peak_hours_start").default(9), // 9 AM
+  peakHoursEnd: integer("peak_hours_end").default(17), // 5 PM
+  peakHoursIntervalMinutes: integer("peak_hours_interval_minutes").default(30), // More frequent during peak hours
+  weekendIntervalMinutes: integer("weekend_interval_minutes").default(360), // 6 hours on weekends
+  nightlyIntervalMinutes: integer("nightly_interval_minutes").default(720), // 12 hours overnight
+  activityBasedSync: boolean("activity_based_sync").default(false),
+  lastUserActivity: timestamp("last_user_activity"),
+  maxDailyApiCalls: integer("max_daily_api_calls").default(500), // Conservative API usage limit
+  smartSyncSettings: jsonb("smart_sync_settings"), // Additional smart sync configuration
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
