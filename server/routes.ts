@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir, processDocumentWithAutoLinking, DocumentUploadContext } from "./document-processor";
 import { analyzeDocument, generateCaseConceptualization, analyzeDocumentForSessionMatching, extractCalendarContext, generateAutoLinkingMetadata } from "./documentTagger";
 import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } from "./document-fix";
-import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema } from "@shared/schema";
+import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema, insertCalendarEventReviewSchema } from "@shared/schema";
 import { z } from "zod";
 
 // Dr. Jonathan Procter's therapist ID for single-therapist practice (no authentication)
@@ -889,6 +889,164 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         message: "Failed to reconcile calendar sessions",
         error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Calendar Review routes - Manual review system for rejected calendar events
+  app.get("/api/calendar/pending-reviews", async (req: Request, res) => {
+    try {
+      const reviews = await storage.getPendingCalendarEventReviews(THERAPIST_ID);
+      res.json(reviews);
+    } catch (error) {
+      console.error("Error fetching pending calendar reviews:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch pending calendar reviews",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.get("/api/calendar/pending-count", async (req: Request, res) => {
+    try {
+      const count = await storage.getPendingReviewCount(THERAPIST_ID);
+      res.json({ count });
+    } catch (error) {
+      console.error("Error fetching pending review count:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch pending review count",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.post("/api/calendar/approve-event/:id", async (req: Request, res) => {
+    try {
+      const reviewId = req.params.id;
+      const review = await storage.getCalendarEventReviewById(reviewId, THERAPIST_ID);
+      
+      if (!review) {
+        return res.status(404).json({ message: "Calendar event review not found" });
+      }
+
+      if (review.status !== 'pending') {
+        return res.status(400).json({ message: "Event review is not pending" });
+      }
+
+      if (!review.suggestedClientId) {
+        return res.status(400).json({ message: "No client assigned to event" });
+      }
+
+      // Create session from the approved event
+      const sessionData = insertSessionSchema.parse({
+        clientId: review.suggestedClientId,
+        therapistId: THERAPIST_ID,
+        sessionDate: review.eventDate,
+        duration: review.eventDuration || 60, // Default to 60 minutes if not specified
+        sessionType: 'individual',
+        notes: `Session created from calendar event: ${review.eventTitle}`,
+        externalEventId: review.eventId,
+        sourceCalendar: 'manual_review'
+      });
+
+      const session = await storage.createSession(sessionData);
+
+      // Update review status to approved
+      await storage.updateCalendarEventReview(reviewId, {
+        status: 'approved'
+      }, THERAPIST_ID);
+
+      res.json({
+        success: true,
+        message: "Event approved and session created successfully",
+        session,
+        reviewId
+      });
+    } catch (error) {
+      console.error("Error approving calendar event:", error);
+      res.status(500).json({ 
+        message: "Failed to approve calendar event",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.post("/api/calendar/reject-event/:id", async (req: Request, res) => {
+    try {
+      const reviewId = req.params.id;
+      const { therapistNotes } = req.body;
+      
+      const review = await storage.getCalendarEventReviewById(reviewId, THERAPIST_ID);
+      
+      if (!review) {
+        return res.status(404).json({ message: "Calendar event review not found" });
+      }
+
+      if (review.status !== 'pending') {
+        return res.status(400).json({ message: "Event review is not pending" });
+      }
+
+      // Update review status to rejected
+      await storage.updateCalendarEventReview(reviewId, {
+        status: 'rejected',
+        therapistNotes: therapistNotes || null
+      }, THERAPIST_ID);
+
+      res.json({
+        success: true,
+        message: "Event rejected successfully",
+        reviewId
+      });
+    } catch (error) {
+      console.error("Error rejecting calendar event:", error);
+      res.status(500).json({ 
+        message: "Failed to reject calendar event",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  app.put("/api/calendar/assign-client/:id", async (req: Request, res) => {
+    try {
+      const reviewId = req.params.id;
+      const { clientId, therapistNotes } = req.body;
+
+      if (!clientId) {
+        return res.status(400).json({ message: "Client ID is required" });
+      }
+
+      const review = await storage.getCalendarEventReviewById(reviewId, THERAPIST_ID);
+      
+      if (!review) {
+        return res.status(404).json({ message: "Calendar event review not found" });
+      }
+
+      if (review.status !== 'pending') {
+        return res.status(400).json({ message: "Event review is not pending" });
+      }
+
+      // Verify client exists and belongs to therapist
+      const client = await storage.getClientById(clientId, THERAPIST_ID);
+      if (!client) {
+        return res.status(404).json({ message: "Client not found" });
+      }
+
+      // Update review with assigned client
+      const updatedReview = await storage.updateCalendarEventReview(reviewId, {
+        suggestedClientId: clientId,
+        therapistNotes: therapistNotes || null
+      }, THERAPIST_ID);
+
+      res.json({
+        success: true,
+        message: "Client assigned to event successfully",
+        review: updatedReview
+      });
+    } catch (error) {
+      console.error("Error assigning client to calendar event:", error);
+      res.status(500).json({ 
+        message: "Failed to assign client to calendar event",
+        error: error instanceof Error ? error.message : String(error) 
       });
     }
   });

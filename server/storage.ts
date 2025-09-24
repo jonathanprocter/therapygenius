@@ -7,6 +7,7 @@ import {
   treatmentPlans,
   auditLogs,
   rateLimitCounters,
+  calendarEventReviews,
   type User,
   type InsertUser,
   type Client,
@@ -23,6 +24,8 @@ import {
   type InsertAuditLog,
   type RateLimitCounter,
   type InsertRateLimitCounter,
+  type CalendarEventReview,
+  type InsertCalendarEventReview,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, like, or, sql, gte, lte, isNull } from "drizzle-orm";
@@ -108,6 +111,15 @@ export interface IStorage {
     errors: string[];
   }): Promise<void>;
   getSessionByExternalEventId(externalEventId: string, therapistId: string): Promise<Session | null>;
+  
+  // Calendar Event Review methods - Manual review system for rejected calendar events
+  createCalendarEventReview(review: InsertCalendarEventReview): Promise<CalendarEventReview>;
+  getPendingCalendarEventReviews(therapistId: string): Promise<Array<CalendarEventReview & { suggestedClient: Client | null }>>;
+  getCalendarEventReviewById(id: string, therapistId: string): Promise<CalendarEventReview | null>;
+  getCalendarEventReviewByEventId(eventId: string, therapistId: string): Promise<CalendarEventReview | null>;
+  updateCalendarEventReview(id: string, updates: Partial<CalendarEventReview>, therapistId: string): Promise<CalendarEventReview | null>;
+  deleteCalendarEventReview(id: string, therapistId: string): Promise<boolean>;
+  getPendingReviewCount(therapistId: string): Promise<number>;
   
   // HIPAA Audit logging methods
   createAuditLog(auditLog: InsertAuditLog): Promise<AuditLog>;
@@ -701,6 +713,126 @@ export class DatabaseStorage implements IStorage {
       );
 
     return session || null;
+  }
+
+  // Calendar Event Review implementations - Manual review system for rejected calendar events
+  async createCalendarEventReview(review: InsertCalendarEventReview): Promise<CalendarEventReview> {
+    const [createdReview] = await db
+      .insert(calendarEventReviews)
+      .values(review)
+      .returning();
+    return createdReview;
+  }
+
+  async getPendingCalendarEventReviews(therapistId: string): Promise<Array<CalendarEventReview & { suggestedClient: Client | null }>> {
+    const reviews = await db
+      .select({
+        id: calendarEventReviews.id,
+        therapistId: calendarEventReviews.therapistId,
+        eventId: calendarEventReviews.eventId,
+        eventTitle: calendarEventReviews.eventTitle,
+        eventDate: calendarEventReviews.eventDate,
+        eventDescription: calendarEventReviews.eventDescription,
+        eventLocation: calendarEventReviews.eventLocation,
+        eventDuration: calendarEventReviews.eventDuration,
+        suggestedClientId: calendarEventReviews.suggestedClientId,
+        status: calendarEventReviews.status,
+        therapistNotes: calendarEventReviews.therapistNotes,
+        rejectionReason: calendarEventReviews.rejectionReason,
+        aiMatchData: calendarEventReviews.aiMatchData,
+        createdAt: calendarEventReviews.createdAt,
+        updatedAt: calendarEventReviews.updatedAt,
+        suggestedClient: {
+          id: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          email: clients.email,
+        }
+      })
+      .from(calendarEventReviews)
+      .leftJoin(clients, eq(calendarEventReviews.suggestedClientId, clients.id))
+      .where(
+        and(
+          eq(calendarEventReviews.therapistId, therapistId),
+          eq(calendarEventReviews.status, 'pending')
+        )
+      )
+      .orderBy(desc(calendarEventReviews.createdAt));
+
+    return reviews.map(review => ({
+      ...review,
+      suggestedClient: review.suggestedClient.id ? review.suggestedClient as Client : null
+    }));
+  }
+
+  async getCalendarEventReviewById(id: string, therapistId: string): Promise<CalendarEventReview | null> {
+    const [review] = await db
+      .select()
+      .from(calendarEventReviews)
+      .where(
+        and(
+          eq(calendarEventReviews.id, id),
+          eq(calendarEventReviews.therapistId, therapistId)
+        )
+      );
+
+    return review || null;
+  }
+
+  async getCalendarEventReviewByEventId(eventId: string, therapistId: string): Promise<CalendarEventReview | null> {
+    const [review] = await db
+      .select()
+      .from(calendarEventReviews)
+      .where(
+        and(
+          eq(calendarEventReviews.eventId, eventId),
+          eq(calendarEventReviews.therapistId, therapistId)
+        )
+      );
+
+    return review || null;
+  }
+
+  async updateCalendarEventReview(id: string, updates: Partial<CalendarEventReview>, therapistId: string): Promise<CalendarEventReview | null> {
+    const [updatedReview] = await db
+      .update(calendarEventReviews)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(
+        and(
+          eq(calendarEventReviews.id, id),
+          eq(calendarEventReviews.therapistId, therapistId)
+        )
+      )
+      .returning();
+
+    return updatedReview || null;
+  }
+
+  async deleteCalendarEventReview(id: string, therapistId: string): Promise<boolean> {
+    const result = await db
+      .delete(calendarEventReviews)
+      .where(
+        and(
+          eq(calendarEventReviews.id, id),
+          eq(calendarEventReviews.therapistId, therapistId)
+        )
+      );
+
+    return result.rowCount > 0;
+  }
+
+  async getPendingReviewCount(therapistId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(calendarEventReviews)
+      .where(
+        and(
+          eq(calendarEventReviews.therapistId, therapistId),
+          eq(calendarEventReviews.status, 'pending')
+        )
+      );
+
+    return result?.count || 0;
   }
 
   // HIPAA Audit logging implementation - tamper-evident, persistent logging

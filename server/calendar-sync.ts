@@ -350,7 +350,9 @@ class CalendarSyncService {
             matchesFound++;
             console.log(`[Calendar Sync] [RELIABILITY] Upserted session for client ${clientMatch.client.firstName} ${clientMatch.client.lastName}`);
           } else {
-            console.log(`[Calendar Sync] No client match found for event: ${event.summary}`);
+            // No client match found - create review record for manual assignment
+            await this.createEventReviewRecord(event, therapistId, 'no_match', null);
+            console.log(`[Calendar Sync] No client match found for event: ${event.summary} - Added to review queue`);
           }
         } catch (eventError) {
           const errorMsg = `Failed to process event ${event.id}: ${eventError instanceof Error ? eventError.message : String(eventError)}`;
@@ -656,9 +658,9 @@ class CalendarSyncService {
           };
         }
         
-        // Skip individual letter matching for ambiguous names to prevent false positives
-        // Log the skipped match for debugging
-        console.log(`[Calendar Sync] [SECURITY] Skipping ambiguous name match for "${firstName} ${lastName}" in event "${eventTitle.substring(0, 50)}..."`);
+        // Skip individual letter matching for ambiguous names but create review record
+        console.log(`[Calendar Sync] [SECURITY] Skipping ambiguous name match for "${firstName} ${lastName}" in event "${eventTitle.substring(0, 50)}..." - Creating review record`);
+        // Note: We'll create the review record in the calling function with ambiguous reason
         
       } else {
         // Standard check for longer names: both first and last name appear in event title
@@ -1356,6 +1358,86 @@ If no confident match found, respond with: {"match": false}
       this.logAuditEvent('session_reconciliation_failed', therapistId, false, error instanceof Error ? error.message : String(error));
       throw error;
     }
+  }
+
+  /**
+   * Create a calendar event review record for manual processing (with idempotency check)
+   */
+  private async createEventReviewRecord(
+    event: CalendarEvent, 
+    therapistId: string, 
+    rejectionReason: 'no_match' | 'ambiguous' | 'non_therapy', 
+    suggestedClientId?: string | null,
+    aiMatchData?: any
+  ): Promise<void> {
+    try {
+      // IDEMPOTENCY: Check if a review record already exists for this event
+      const existingReview = await storage.getCalendarEventReviewByEventId(event.id, therapistId);
+      
+      if (existingReview) {
+        // If review already exists and is still pending or approved, skip creating a new one
+        if (existingReview.status === 'pending' || existingReview.status === 'approved') {
+          console.log(`[Calendar Sync] [REVIEW] Skipping duplicate review for event: ${event.summary} (status: ${existingReview.status})`);
+          return;
+        }
+        
+        // If it was rejected but now has a different reason, we could optionally update it
+        // For now, we'll skip to avoid spam
+        console.log(`[Calendar Sync] [REVIEW] Skipping previously rejected event: ${event.summary} (status: ${existingReview.status})`);
+        return;
+      }
+
+      const eventDate = event.start?.dateTime 
+        ? new Date(event.start.dateTime) 
+        : event.start?.date 
+        ? new Date(event.start.date) 
+        : new Date();
+
+      const duration = this.calculateEventDuration(event);
+
+      await storage.createCalendarEventReview({
+        therapistId,
+        eventId: event.id,
+        eventTitle: event.summary || 'Untitled Event',
+        eventDate,
+        eventDescription: event.description || null,
+        eventLocation: event.location || null,
+        eventDuration: duration,
+        suggestedClientId: suggestedClientId || null,
+        status: 'pending',
+        rejectionReason,
+        aiMatchData: aiMatchData || null,
+        therapistNotes: null
+      });
+
+      console.log(`[Calendar Sync] [REVIEW] Created review record for event: ${event.summary} (reason: ${rejectionReason})`);
+    } catch (error) {
+      console.error('[Calendar Sync] [REVIEW] Failed to create review record:', error);
+      // Don't throw - we don't want this to break the sync process
+    }
+  }
+
+  /**
+   * Calculate event duration in minutes
+   */
+  private calculateEventDuration(event: CalendarEvent): number | null {
+    if (!event.start || !event.end) return null;
+
+    const startTime = event.start.dateTime 
+      ? new Date(event.start.dateTime) 
+      : event.start.date 
+      ? new Date(event.start.date) 
+      : null;
+
+    const endTime = event.end.dateTime 
+      ? new Date(event.end.dateTime) 
+      : event.end.date 
+      ? new Date(event.end.date) 
+      : null;
+
+    if (!startTime || !endTime) return null;
+
+    return Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60));
   }
 }
 

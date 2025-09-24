@@ -158,6 +158,25 @@ export const treatmentPlans = pgTable("treatment_plans", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Calendar Event Reviews table - Manual review system for rejected calendar events
+export const calendarEventReviews = pgTable("calendar_event_reviews", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  therapistId: uuid("therapist_id").notNull().references(() => users.id),
+  eventId: text("event_id").notNull(), // Google Calendar event ID
+  eventTitle: varchar("event_title", { length: 255 }).notNull(),
+  eventDate: timestamp("event_date").notNull(),
+  eventDescription: text("event_description"),
+  eventLocation: text("event_location"),
+  eventDuration: integer("event_duration"), // minutes
+  suggestedClientId: uuid("suggested_client_id").references(() => clients.id),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, approved, rejected
+  therapistNotes: text("therapist_notes"),
+  rejectionReason: varchar("rejection_reason", { length: 100 }), // no_match, ambiguous, non_therapy, etc.
+  aiMatchData: jsonb("ai_match_data"), // Store AI matching results for analysis
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   clients: many(clients),
@@ -165,6 +184,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   assessments: many(assessments),
   treatmentPlans: many(treatmentPlans),
+  calendarEventReviews: many(calendarEventReviews),
 }));
 
 export const clientsRelations = relations(clients, ({ one, many }) => ({
@@ -176,6 +196,7 @@ export const clientsRelations = relations(clients, ({ one, many }) => ({
   sessions: many(sessions),
   assessments: many(assessments),
   treatmentPlans: many(treatmentPlans),
+  calendarEventReviews: many(calendarEventReviews),
 }));
 
 export const documentsRelations = relations(documents, ({ one }) => ({
@@ -224,6 +245,17 @@ export const treatmentPlansRelations = relations(treatmentPlans, ({ one }) => ({
   therapist: one(users, {
     fields: [treatmentPlans.therapistId],
     references: [users.id],
+  }),
+}));
+
+export const calendarEventReviewsRelations = relations(calendarEventReviews, ({ one }) => ({
+  therapist: one(users, {
+    fields: [calendarEventReviews.therapistId],
+    references: [users.id],
+  }),
+  suggestedClient: one(clients, {
+    fields: [calendarEventReviews.suggestedClientId],
+    references: [clients.id],
   }),
 }));
 
@@ -278,6 +310,12 @@ export const insertTreatmentPlanSchema = createInsertSchema(treatmentPlans).omit
   updatedAt: true,
 });
 
+export const insertCalendarEventReviewSchema = createInsertSchema(calendarEventReviews).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -302,6 +340,9 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 
 export type RateLimitCounter = typeof rateLimitCounters.$inferSelect;
 export type InsertRateLimitCounter = z.infer<typeof insertRateLimitCounterSchema>;
+
+export type CalendarEventReview = typeof calendarEventReviews.$inferSelect;
+export type InsertCalendarEventReview = z.infer<typeof insertCalendarEventReviewSchema>;
 
 // Dashboard stats interface
 export interface DashboardStats {

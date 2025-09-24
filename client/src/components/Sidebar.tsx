@@ -1,10 +1,13 @@
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 const navigationItems = [
   { path: "/", icon: "fas fa-chart-line", label: "Dashboard" },
   { path: "/clients", icon: "fas fa-users", label: "Clients" },
   { path: "/calendar/settings", icon: "fas fa-calendar-alt", label: "Calendar Sync" },
+  { path: "/calendar/reviews", icon: "fas fa-exclamation-triangle", label: "Calendar Reviews", badge: true },
   { path: "/documents", icon: "fas fa-file-medical", label: "Documents" },
   { path: "/assessments", icon: "fas fa-clipboard-list", label: "Assessments" },
   { path: "/reports", icon: "fas fa-chart-bar", label: "Reports" },
@@ -19,6 +22,12 @@ const aiToolsItems = [
 
 export function Sidebar() {
   const [location, setLocation] = useLocation();
+
+  // Fetch pending calendar review count
+  const { data: pendingCount = 0 } = useQuery({
+    queryKey: ["/api/calendar/pending-count"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
 
   const isActive = (path: string) => {
     if (path === "/") {
@@ -47,15 +56,26 @@ export function Sidebar() {
               <Link
                 href={item.path}
                 className={cn(
-                  "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  "flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors",
                   isActive(item.path)
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 )}
                 data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
               >
-                <i className={cn(item.icon, "w-4")}></i>
-                <span>{item.label}</span>
+                <div className="flex items-center space-x-3">
+                  <i className={cn(item.icon, "w-4")}></i>
+                  <span>{item.label}</span>
+                </div>
+                {item.badge && pendingCount?.count > 0 && (
+                  <Badge 
+                    variant="destructive" 
+                    className="ml-auto text-xs"
+                    data-testid="calendar-reviews-badge"
+                  >
+                    {pendingCount.count}
+                  </Badge>
+                )}
               </Link>
             </li>
           ))}
