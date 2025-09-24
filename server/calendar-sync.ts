@@ -847,10 +847,11 @@ class CalendarSyncService {
       // STEP 1: Check aliases FIRST (deterministic, highest priority)
       const aliasMatch = await this.checkAliases(eventTitle, therapistId);
       if (aliasMatch) {
+        this.logAuditEvent('match_method_used', therapistId, true, `alias_match: ${aliasMatch.matchReason}`);
         return aliasMatch;
       }
 
-      // Get all clients for fuzzy matching
+      // Get all clients for enhanced matching
       const clients = await storage.getClientsByTherapist(therapistId);
       
       if (clients.length === 0) {
@@ -865,24 +866,51 @@ class CalendarSyncService {
           email: a.email,
           name: a.displayName
         })) || [],
-        location: event.location || ''
+        location: event.location || '',
+        start: event.start,
+        end: event.end
       };
 
-      // STEP 2: Try direct name matching
+      // STEP 2: Enhanced keyword-based matching
+      const keywordMatch = this.findKeywordBasedMatch(eventInfo, clients);
+      if (keywordMatch) {
+        this.logAuditEvent('match_method_used', therapistId, true, `keyword_match: ${keywordMatch.matchReason}`);
+        return keywordMatch;
+      }
+
+      // STEP 3: Enhanced pattern recognition
+      const patternMatch = this.findEnhancedPatternMatch(eventInfo, clients);
+      if (patternMatch) {
+        this.logAuditEvent('match_method_used', therapistId, true, `pattern_match: ${patternMatch.matchReason}`);
+        return patternMatch;
+      }
+
+      // STEP 4: Enhanced fuzzy name matching
+      const fuzzyMatch = this.findFuzzyNameMatch(eventInfo, clients);
+      if (fuzzyMatch) {
+        this.logAuditEvent('match_method_used', therapistId, true, `fuzzy_match: ${fuzzyMatch.matchReason}`);
+        return fuzzyMatch;
+      }
+
+      // STEP 5: Original direct name matching (existing patterns)
       const directMatch = this.findDirectMatch(eventInfo, clients);
       if (directMatch) {
+        this.logAuditEvent('match_method_used', therapistId, true, `direct_match: ${directMatch.matchReason}`);
         return directMatch;
       }
 
-      // STEP 3: Use AI for intelligent matching
+      // STEP 6: Use AI for intelligent matching (lowest priority)
       const aiMatch = await this.findAIMatch(eventInfo, clients, therapistId);
       if (aiMatch) {
+        this.logAuditEvent('match_method_used', therapistId, true, `ai_match: ${aiMatch.matchReason}`);
         return aiMatch;
       }
 
+      this.logAuditEvent('match_method_used', therapistId, false, 'no_match_found');
       return null;
     } catch (error) {
       console.error('[Calendar Sync] Error matching event to client:', error);
+      this.logAuditEvent('match_error', therapistId, false, error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -1100,6 +1128,444 @@ class CalendarSyncService {
       }
     }
 
+    return null;
+  }
+
+  /**
+   * Enhanced keyword-based matching for therapy sessions
+   * Combines therapy-related keywords with partial client name matching
+   */
+  private findKeywordBasedMatch(eventInfo: any, clients: any[]): ClientMatch | null {
+    const eventTitle = eventInfo.title.toLowerCase();
+    const eventDescription = eventInfo.description?.toLowerCase() || '';
+    const eventLocation = eventInfo.location?.toLowerCase() || '';
+    
+    // Therapy session keywords
+    const therapyKeywords = [
+      'session', 'therapy', 'appointment', 'consultation', 'meeting', 'check-in',
+      'counseling', 'psychotherapy', 'individual', 'assessment', 'intake',
+      'follow-up', 'followup', 'visit', 'treatment', 'clinical'
+    ];
+    
+    // Session type patterns
+    const sessionTypePatterns = [
+      'individual session', 'group session', 'family session', 'couples session',
+      'intake session', 'assessment session', 'therapy session', 'counseling session',
+      'initial consultation', 'follow up', 'check in', 'treatment session'
+    ];
+    
+    // Office location indicators
+    const officePatterns = [
+      'office', 'clinic', 'suite', 'room', 'building', 'center', 'practice',
+      'telehealth', 'virtual', 'video call', 'zoom', 'online'
+    ];
+    
+    // Check if event contains therapy-related keywords
+    const hasTherapyKeyword = therapyKeywords.some(keyword => 
+      eventTitle.includes(keyword) || eventDescription.includes(keyword)
+    );
+    
+    const hasSessionType = sessionTypePatterns.some(pattern => 
+      eventTitle.includes(pattern) || eventDescription.includes(pattern)
+    );
+    
+    const hasOfficeIndicator = officePatterns.some(pattern => 
+      eventTitle.includes(pattern) || eventDescription.includes(pattern) || eventLocation.includes(pattern)
+    );
+    
+    if (hasTherapyKeyword || hasSessionType || hasOfficeIndicator) {
+      // Now look for client name matches within the therapy context
+      for (const client of clients) {
+        const firstName = client.firstName.toLowerCase();
+        const lastName = client.lastName.toLowerCase();
+        const fullName = `${firstName} ${lastName}`;
+        
+        // Higher confidence matches when therapy keywords are present
+        let confidence = 0.75;
+        let matchDetails = [];
+        
+        if (hasTherapyKeyword) {
+          confidence += 0.1;
+          matchDetails.push('therapy keyword');
+        }
+        if (hasSessionType) {
+          confidence += 0.1;
+          matchDetails.push('session type');
+        }
+        if (hasOfficeIndicator) {
+          confidence += 0.05;
+          matchDetails.push('office location');
+        }
+        
+        // Check for partial name matches in therapy context
+        if (eventTitle.includes(fullName)) {
+          return {
+            clientId: client.id,
+            confidence: Math.min(confidence + 0.15, 0.95),
+            matchReason: `Keyword-based full name match with ${matchDetails.join(', ')}`,
+            client
+          };
+        }
+        
+        if (eventTitle.includes(firstName) && eventTitle.includes(lastName)) {
+          return {
+            clientId: client.id,
+            confidence: Math.min(confidence + 0.1, 0.9),
+            matchReason: `Keyword-based name parts match with ${matchDetails.join(', ')}`,
+            client
+          };
+        }
+        
+        // Check for first name match in strong therapy context
+        if ((hasTherapyKeyword || hasSessionType) && eventTitle.includes(firstName) && firstName.length > 2) {
+          return {
+            clientId: client.id,
+            confidence: Math.min(confidence, 0.8),
+            matchReason: `Keyword-based first name match with ${matchDetails.join(', ')}`,
+            client
+          };
+        }
+        
+        // Check for last name match in strong therapy context
+        if ((hasTherapyKeyword || hasSessionType) && eventTitle.includes(lastName) && lastName.length > 2) {
+          return {
+            clientId: client.id,
+            confidence: Math.min(confidence, 0.8),
+            matchReason: `Keyword-based last name match with ${matchDetails.join(', ')}`,
+            client
+          };
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Enhanced pattern recognition for calendar events
+   * Includes time-based patterns, email/domain matching, phone patterns, recurring patterns
+   */
+  private findEnhancedPatternMatch(eventInfo: any, clients: any[]): ClientMatch | null {
+    const eventTitle = eventInfo.title.toLowerCase();
+    const eventDescription = eventInfo.description?.toLowerCase() || '';
+    const fullEventText = `${eventTitle} ${eventDescription}`.trim();
+    
+    // Extract email patterns from event text
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    const emailMatches = fullEventText.match(emailRegex) || [];
+    
+    // Extract phone number patterns
+    const phoneRegex = /\b(?:\+?1[-.]?)?\(?([0-9]{3})\)?[-.]?([0-9]{3})[-.]?([0-9]{4})\b/g;
+    const phoneMatches = fullEventText.match(phoneRegex) || [];
+    
+    // Check email-based matching
+    if (emailMatches.length > 0) {
+      for (const client of clients) {
+        if (client.email) {
+          const clientEmail = client.email.toLowerCase();
+          for (const eventEmail of emailMatches) {
+            if (eventEmail.toLowerCase() === clientEmail) {
+              return {
+                clientId: client.id,
+                confidence: 0.95,
+                matchReason: 'Email address pattern match',
+                client
+              };
+            }
+            
+            // Check domain matching for corporate/clinic emails
+            const eventDomain = eventEmail.split('@')[1];
+            const clientDomain = clientEmail.split('@')[1];
+            if (eventDomain === clientDomain && eventDomain && clientDomain) {
+              // Additional validation - check if name parts appear in event
+              const firstName = client.firstName.toLowerCase();
+              const lastName = client.lastName.toLowerCase();
+              if (eventTitle.includes(firstName) || eventTitle.includes(lastName)) {
+                return {
+                  clientId: client.id,
+                  confidence: 0.85,
+                  matchReason: 'Email domain match with name presence',
+                  client
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Time-based pattern recognition (regular appointment slots)
+    if (eventInfo.start?.dateTime) {
+      const eventStart = new Date(eventInfo.start.dateTime);
+      const dayOfWeek = eventStart.getDay();
+      const hour = eventStart.getHours();
+      const minute = eventStart.getMinutes();
+      
+      // Check for recurring appointment patterns (same time slot)
+      const timeSlotPattern = `${dayOfWeek}-${hour}:${minute.toString().padStart(2, '0')}`;
+      
+      // If event has typical therapy session duration (45-60 minutes)
+      if (eventInfo.end?.dateTime) {
+        const eventEnd = new Date(eventInfo.end.dateTime);
+        const duration = (eventEnd.getTime() - eventStart.getTime()) / (1000 * 60);
+        
+        if (duration >= 45 && duration <= 75) {
+          // Look for client names in therapy-duration events
+          for (const client of clients) {
+            const firstName = client.firstName.toLowerCase();
+            const lastName = client.lastName.toLowerCase();
+            
+            if (eventTitle.includes(firstName) || eventTitle.includes(lastName)) {
+              return {
+                clientId: client.id,
+                confidence: 0.8,
+                matchReason: 'Time-based pattern match (therapy duration + name)',
+                client
+              };
+            }
+          }
+        }
+      }
+    }
+    
+    // Phone number pattern matching
+    if (phoneMatches.length > 0) {
+      // Note: This is a placeholder for future phone number matching
+      // Would require client phone numbers to be stored and compared
+      // Commenting out for now as client phone numbers aren't in the current schema
+      /*
+      for (const client of clients) {
+        if (client.phone) {
+          for (const eventPhone of phoneMatches) {
+            if (normalizePhoneNumber(eventPhone) === normalizePhoneNumber(client.phone)) {
+              return {
+                clientId: client.id,
+                confidence: 0.9,
+                matchReason: 'Phone number pattern match',
+                client
+              };
+            }
+          }
+        }
+      }
+      */
+    }
+    
+    // Recurring appointment pattern recognition
+    const recurringPatterns = [
+      /weekly.*with/i,
+      /every.*week/i,
+      /recurring.*appointment/i,
+      /standing.*appointment/i,
+      /regular.*session/i
+    ];
+    
+    const hasRecurringPattern = recurringPatterns.some(pattern => 
+      pattern.test(eventTitle) || pattern.test(eventDescription)
+    );
+    
+    if (hasRecurringPattern) {
+      for (const client of clients) {
+        const firstName = client.firstName.toLowerCase();
+        const lastName = client.lastName.toLowerCase();
+        
+        if (eventTitle.includes(firstName) || eventTitle.includes(lastName)) {
+          return {
+            clientId: client.id,
+            confidence: 0.85,
+            matchReason: 'Recurring appointment pattern with name match',
+            client
+          };
+        }
+      }
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Enhanced fuzzy name matching with nickname, initial, and variation handling
+   */
+  private findFuzzyNameMatch(eventInfo: any, clients: any[]): ClientMatch | null {
+    const eventTitle = eventInfo.title.toLowerCase();
+    
+    // Common nickname mappings
+    const nicknameMap: { [key: string]: string[] } = {
+      'bob': ['robert', 'rob', 'bobby'],
+      'bill': ['william', 'will', 'billy'],
+      'jim': ['james', 'jimmy'],
+      'mike': ['michael', 'mick', 'mickey'],
+      'dave': ['david', 'davy'],
+      'joe': ['joseph', 'joey'],
+      'tom': ['thomas', 'tommy'],
+      'dan': ['daniel', 'danny'],
+      'chris': ['christopher', 'christian'],
+      'matt': ['matthew', 'matty'],
+      'rick': ['richard', 'ricky'],
+      'steve': ['stephen', 'steven'],
+      'jeff': ['jeffrey', 'geoffrey'],
+      'nick': ['nicholas', 'nicolas'],
+      'sam': ['samuel', 'samantha'],
+      'alex': ['alexander', 'alexandra', 'alexis'],
+      'beth': ['elizabeth', 'betsy', 'betty'],
+      'sue': ['susan', 'suzanne'],
+      'liz': ['elizabeth', 'lisa'],
+      'kate': ['katherine', 'kathryn', 'katie'],
+      'jen': ['jennifer', 'jenny'],
+      'jess': ['jessica', 'jessie']
+    };
+    
+    // Reverse mapping for lookup
+    const reverseNicknameMap: { [key: string]: string[] } = {};
+    Object.entries(nicknameMap).forEach(([nickname, fullNames]) => {
+      fullNames.forEach(fullName => {
+        if (!reverseNicknameMap[fullName]) {
+          reverseNicknameMap[fullName] = [];
+        }
+        reverseNicknameMap[fullName].push(nickname);
+      });
+    });
+    
+    for (const client of clients) {
+      const firstName = client.firstName.toLowerCase();
+      const lastName = client.lastName.toLowerCase();
+      
+      // 1. Check nickname variations
+      const possibleNicknames = reverseNicknameMap[firstName] || [];
+      for (const nickname of possibleNicknames) {
+        if (eventTitle.includes(nickname)) {
+          return {
+            clientId: client.id,
+            confidence: 0.85,
+            matchReason: `Fuzzy match: nickname '${nickname}' for '${firstName}'`,
+            client
+          };
+        }
+      }
+      
+      // Check if event contains a nickname that maps to client's name
+      Object.entries(nicknameMap).forEach(([nickname, possibleNames]) => {
+        if (eventTitle.includes(nickname) && possibleNames.includes(firstName)) {
+          return {
+            clientId: client.id,
+            confidence: 0.85,
+            matchReason: `Fuzzy match: '${nickname}' matches '${firstName}'`,
+            client
+          };
+        }
+      });
+      
+      // 2. Initial-based matching (e.g., "J.K." for "John Kennedy")
+      const initials = `${firstName.charAt(0)}.${lastName.charAt(0)}.`;
+      const initialsNoDots = `${firstName.charAt(0)}${lastName.charAt(0)}`;
+      const initialsSpaced = `${firstName.charAt(0)}. ${lastName.charAt(0)}.`;
+      
+      if (eventTitle.includes(initials) || eventTitle.includes(initialsNoDots) || eventTitle.includes(initialsSpaced)) {
+        return {
+          clientId: client.id,
+          confidence: 0.8,
+          matchReason: `Fuzzy match: initials '${initials}' for '${firstName} ${lastName}'`,
+          client
+        };
+      }
+      
+      // 3. Common misspelling patterns
+      const commonMisspellings = [
+        // Remove/add common letters
+        firstName.replace('ph', 'f'),  // Stephen -> Stefen
+        firstName.replace('f', 'ph'),   // Stefen -> Stephen
+        firstName.replace('c', 'k'),    // Catherine -> Katherine
+        firstName.replace('k', 'c'),    // Katherine -> Catherine
+        firstName.replace('y', 'ie'),   // Tony -> Tonie
+        firstName.replace('ie', 'y'),   // Tonie -> Tony
+        // Double letters
+        firstName.replace(/([a-z])\1/, '$1'), // Remove double letters
+        firstName.replace(/([aeiou])/, '$1$1'), // Add double vowels (limited)
+      ];
+      
+      for (const variant of commonMisspellings) {
+        if (variant !== firstName && variant.length > 2 && eventTitle.includes(variant)) {
+          return {
+            clientId: client.id,
+            confidence: 0.75,
+            matchReason: `Fuzzy match: spelling variant '${variant}' for '${firstName}'`,
+            client
+          };
+        }
+      }
+      
+      // 4. Middle name handling - check if event contains parts that could be middle names
+      const eventWords = eventTitle.split(/\s+/);
+      const clientNameParts = [firstName, lastName];
+      
+      // Look for patterns like "FirstName MiddleName LastName" where we only have "FirstName LastName"
+      for (let i = 0; i < eventWords.length - 1; i++) {
+        if (eventWords[i] === firstName && eventWords[i + 2] === lastName) {
+          // Potential middle name at i+1
+          return {
+            clientId: client.id,
+            confidence: 0.8,
+            matchReason: `Fuzzy match: potential middle name pattern '${eventWords[i]} ${eventWords[i+1]} ${eventWords[i+2]}'`,
+            client
+          };
+        }
+      }
+      
+      // 5. Partial name matching with higher tolerance
+      const levenshteinDistance = (a: string, b: string): number => {
+        const matrix = [];
+        for (let i = 0; i <= b.length; i++) {
+          matrix[i] = [i];
+        }
+        for (let j = 0; j <= a.length; j++) {
+          matrix[0][j] = j;
+        }
+        for (let i = 1; i <= b.length; i++) {
+          for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+              matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+              matrix[i][j] = Math.min(
+                matrix[i - 1][j - 1] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j] + 1
+              );
+            }
+          }
+        }
+        return matrix[b.length][a.length];
+      };
+      
+      // Check for close matches using edit distance
+      for (const word of eventWords) {
+        if (word.length > 3) {
+          const firstNameDistance = levenshteinDistance(word, firstName);
+          const lastNameDistance = levenshteinDistance(word, lastName);
+          
+          // Allow 1-2 character differences for names > 4 characters
+          const maxDistance = Math.max(1, Math.floor(firstName.length * 0.3));
+          
+          if (firstNameDistance <= maxDistance && firstNameDistance > 0) {
+            return {
+              clientId: client.id,
+              confidence: 0.7,
+              matchReason: `Fuzzy match: '${word}' close to '${firstName}' (distance: ${firstNameDistance})`,
+              client
+            };
+          }
+          
+          if (lastNameDistance <= maxDistance && lastNameDistance > 0) {
+            return {
+              clientId: client.id,
+              confidence: 0.7,
+              matchReason: `Fuzzy match: '${word}' close to '${lastName}' (distance: ${lastNameDistance})`,
+              client
+            };
+          }
+        }
+      }
+    }
+    
     return null;
   }
 
