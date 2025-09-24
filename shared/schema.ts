@@ -204,6 +204,20 @@ export const calendarEventReviews = pgTable("calendar_event_reviews", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Calendar Event Aliases table - Persistent patterns for automatic event-to-client matching
+export const calendarEventAliases = pgTable("calendar_event_aliases", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  therapistId: uuid("therapist_id").notNull().references(() => users.id),
+  aliasPattern: text("alias_pattern").notNull(), // Pattern to match against event titles
+  matchType: varchar("match_type", { length: 20 }).notNull().default("contains"), // exact, contains, starts_with, ends_with, regex
+  clientId: uuid("client_id").notNull().references(() => clients.id),
+  isActive: boolean("is_active").notNull().default(true),
+  createdFromEventId: text("created_from_event_id"), // Optional - track source event
+  notes: text("notes"), // Optional - therapist notes about this mapping
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   clients: many(clients),
@@ -213,6 +227,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   treatmentPlans: many(treatmentPlans),
   calendarSyncHistory: many(calendarSyncHistory),
   calendarEventReviews: many(calendarEventReviews),
+  calendarEventAliases: many(calendarEventAliases),
 }));
 
 export const clientsRelations = relations(clients, ({ one, many }) => ({
@@ -225,6 +240,7 @@ export const clientsRelations = relations(clients, ({ one, many }) => ({
   assessments: many(assessments),
   treatmentPlans: many(treatmentPlans),
   calendarEventReviews: many(calendarEventReviews),
+  calendarEventAliases: many(calendarEventAliases),
 }));
 
 export const documentsRelations = relations(documents, ({ one }) => ({
@@ -299,6 +315,17 @@ export const calendarEventReviewsRelations = relations(calendarEventReviews, ({ 
   }),
 }));
 
+export const calendarEventAliasesRelations = relations(calendarEventAliases, ({ one }) => ({
+  therapist: one(users, {
+    fields: [calendarEventAliases.therapistId],
+    references: [users.id],
+  }),
+  client: one(clients, {
+    fields: [calendarEventAliases.clientId],
+    references: [clients.id],
+  }),
+}));
+
 // Insert schemas
 // Audit logs and rate limiting insert schemas
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
@@ -362,6 +389,12 @@ export const insertCalendarEventReviewSchema = createInsertSchema(calendarEventR
   updatedAt: true,
 });
 
+export const insertCalendarEventAliasSchema = createInsertSchema(calendarEventAliases).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -392,6 +425,9 @@ export type InsertCalendarSyncHistory = z.infer<typeof insertCalendarSyncHistory
 
 export type CalendarEventReview = typeof calendarEventReviews.$inferSelect;
 export type InsertCalendarEventReview = z.infer<typeof insertCalendarEventReviewSchema>;
+
+export type CalendarEventAlias = typeof calendarEventAliases.$inferSelect;
+export type InsertCalendarEventAlias = z.infer<typeof insertCalendarEventAliasSchema>;
 
 // Dashboard stats interface
 export interface DashboardStats {

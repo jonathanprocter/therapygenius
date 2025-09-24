@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir, processDocumentWithAutoLinking, DocumentUploadContext } from "./document-processor";
 import { analyzeDocument, generateCaseConceptualization, analyzeDocumentForSessionMatching, extractCalendarContext, generateAutoLinkingMetadata } from "./documentTagger";
 import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } from "./document-fix";
-import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema, insertCalendarEventReviewSchema } from "@shared/schema";
+import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema, insertCalendarEventReviewSchema, insertCalendarEventAliasSchema } from "@shared/schema";
 import { z } from "zod";
 
 // Dr. Jonathan Procter's therapist ID for single-therapist practice (no authentication)
@@ -1111,6 +1111,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error assigning client to calendar event:", error);
       res.status(500).json({ 
         message: "Failed to assign client to calendar event",
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  // Calendar Alias routes - Persistent patterns for automatic event-to-client matching
+  app.get("/api/calendar/aliases", async (req: Request, res) => {
+    try {
+      const aliases = await storage.getCalendarEventAliases(THERAPIST_ID);
+      res.json(aliases);
+    } catch (error) {
+      console.error("Error fetching calendar aliases:", error);
+      res.status(500).json({ message: "Failed to fetch calendar aliases" });
+    }
+  });
+
+  app.post("/api/calendar/aliases", async (req: Request, res) => {
+    try {
+      const aliasData = insertCalendarEventAliasSchema.parse({
+        ...req.body,
+        therapistId: THERAPIST_ID,
+      });
+      
+      const alias = await storage.createCalendarEventAlias(aliasData);
+      res.status(201).json(alias);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid alias data", errors: error.errors });
+      }
+      console.error("Error creating calendar alias:", error);
+      res.status(500).json({ message: "Failed to create calendar alias" });
+    }
+  });
+
+  app.put("/api/calendar/aliases/:id", async (req: Request, res) => {
+    try {
+      const aliasId = req.params.id;
+      const updateData = req.body;
+
+      // Remove fields that shouldn't be updated directly
+      const { id, therapistId, createdAt, ...updates } = updateData;
+
+      const updatedAlias = await storage.updateCalendarEventAlias(aliasId, updates, THERAPIST_ID);
+      if (!updatedAlias) {
+        return res.status(404).json({ message: "Calendar alias not found" });
+      }
+      
+      res.json(updatedAlias);
+    } catch (error) {
+      console.error("Error updating calendar alias:", error);
+      res.status(500).json({ message: "Failed to update calendar alias" });
+    }
+  });
+
+  app.delete("/api/calendar/aliases/:id", async (req: Request, res) => {
+    try {
+      const aliasId = req.params.id;
+      const deleted = await storage.deleteCalendarEventAlias(aliasId, THERAPIST_ID);
+      
+      if (!deleted) {
+        return res.status(404).json({ message: "Calendar alias not found" });
+      }
+      
+      res.json({ message: "Calendar alias deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting calendar alias:", error);
+      res.status(500).json({ message: "Failed to delete calendar alias" });
+    }
+  });
+
+  app.post("/api/calendar/test-alias", async (req: Request, res) => {
+    try {
+      const { pattern, matchType, testText } = req.body;
+      
+      if (!pattern || !matchType || !testText) {
+        return res.status(400).json({ 
+          message: "Missing required fields: pattern, matchType, and testText are required" 
+        });
+      }
+
+      const matches = await storage.testAliasPattern(pattern, matchType, testText);
+      
+      res.json({
+        matches,
+        pattern,
+        matchType,
+        testText,
+        explanation: `Pattern "${pattern}" with match type "${matchType}" ${matches ? 'matches' : 'does not match'} the text "${testText}"`
+      });
+    } catch (error) {
+      console.error("Error testing alias pattern:", error);
+      res.status(500).json({ 
+        message: "Failed to test alias pattern",
         error: error instanceof Error ? error.message : String(error) 
       });
     }

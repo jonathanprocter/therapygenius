@@ -22,6 +22,7 @@ import AISmartSearch from "@/pages/ai/smart-search";
 import AICaseInsights from "@/pages/ai/case-insights";
 import AIDocumentAnalysis from "@/pages/ai/document-analysis";
 import CalendarReviews from "@/pages/calendar-reviews";
+import CalendarAliases from "@/pages/calendar-aliases";
 
 function AppHeader({ onMenuToggle, isMobileMenuOpen }: { onMenuToggle?: () => void; isMobileMenuOpen?: boolean }) {
   const isMobile = useIsMobile();
@@ -105,6 +106,7 @@ function MobileNavigation({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
     { path: "/calendar/settings", icon: "fas fa-calendar-alt", label: "Calendar Sync" },
     { path: "/calendar/sync-dashboard", icon: "fas fa-analytics", label: "Sync Dashboard" },
     { path: "/calendar/reviews", icon: "fas fa-exclamation-triangle", label: "Calendar Reviews" },
+    { path: "/calendar/aliases", icon: "fas fa-link", label: "Calendar Aliases" },
     { path: "/documents", icon: "fas fa-file-medical", label: "Documents" },
     { path: "/assessments", icon: "fas fa-clipboard-list", label: "Assessments" },
     { path: "/reports", icon: "fas fa-chart-bar", label: "Reports" },
@@ -242,6 +244,7 @@ function MainApp() {
             <Route path="/calendar/settings" component={CalendarSettings} />
             <Route path="/calendar/sync-dashboard" component={CalendarSyncDashboard} />
             <Route path="/calendar/reviews" component={CalendarReviews} />
+            <Route path="/calendar/aliases" component={CalendarAliases} />
             <Route path="/schedule" component={() => <div>Schedule page coming soon</div>} />
             <Route path="/assessments" component={Assessments} />
             <Route path="/reports" component={Reports} />

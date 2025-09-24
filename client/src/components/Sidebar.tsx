@@ -9,6 +9,7 @@ const navigationItems = [
   { path: "/calendar/settings", icon: "fas fa-calendar-alt", label: "Calendar Sync" },
   { path: "/calendar/sync-dashboard", icon: "fas fa-analytics", label: "Sync Dashboard" },
   { path: "/calendar/reviews", icon: "fas fa-exclamation-triangle", label: "Calendar Reviews", badge: true },
+  { path: "/calendar/aliases", icon: "fas fa-link", label: "Calendar Aliases" },
   { path: "/documents", icon: "fas fa-file-medical", label: "Documents" },
   { path: "/assessments", icon: "fas fa-clipboard-list", label: "Assessments" },
   { path: "/reports", icon: "fas fa-chart-bar", label: "Reports" },

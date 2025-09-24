@@ -8,9 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
+import { Link } from "lucide-react";
 
 interface CalendarEventReview {
   id: string;
@@ -46,6 +51,12 @@ export default function CalendarReviews() {
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set());
   const [assignmentNotes, setAssignmentNotes] = useState<Record<string, string>>({});
   const [clientAssignments, setClientAssignments] = useState<Record<string, string>>({});
+  const [createAliasDialogOpen, setCreateAliasDialogOpen] = useState<string | null>(null);
+  const [aliasPattern, setAliasPattern] = useState('');
+  const [aliasMatchType, setAliasMatchType] = useState<'exact' | 'contains' | 'starts_with' | 'ends_with' | 'regex'>('contains');
+  const [aliasClientId, setAliasClientId] = useState('');
+  const [aliasNotes, setAliasNotes] = useState('');
+  const [aliasIsActive, setAliasIsActive] = useState(true);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -132,6 +143,39 @@ export default function CalendarReviews() {
     },
   });
 
+  // Create alias mutation
+  const createAliasMutation = useMutation({
+    mutationFn: async (aliasData: {
+      aliasPattern: string;
+      matchType: 'exact' | 'contains' | 'starts_with' | 'ends_with' | 'regex';
+      clientId: string;
+      isActive: boolean;
+      notes?: string;
+      createdFromEventId?: string;
+    }) => {
+      return apiRequest("/api/calendar/aliases", {
+        method: "POST",
+        body: JSON.stringify(aliasData),
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Alias Created",
+        description: "Calendar alias created successfully! Future similar events will be automatically matched.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/calendar/aliases"] });
+      setCreateAliasDialogOpen(null);
+      resetAliasForm();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Alias Creation Failed",
+        description: error.message || "Failed to create calendar alias",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSelectEvent = (eventId: string, checked: boolean) => {
     const newSelected = new Set(selectedEvents);
     if (checked) {
@@ -186,6 +230,93 @@ export default function CalendarReviews() {
 
   const handleNotesChange = (reviewId: string, notes: string) => {
     setAssignmentNotes(prev => ({ ...prev, [reviewId]: notes }));
+  };
+
+  // Helper functions for alias creation
+  const resetAliasForm = () => {
+    setAliasPattern('');
+    setAliasMatchType('contains');
+    setAliasClientId('');
+    setAliasNotes('');
+    setAliasIsActive(true);
+  };
+
+  const autoSuggestPattern = (eventTitle: string, clientName?: string) => {
+    // Try to extract patterns from event title
+    const title = eventTitle.toLowerCase().trim();
+    
+    if (clientName) {
+      const fullName = clientName.toLowerCase();
+      const firstName = fullName.split(' ')[0];
+      const lastName = fullName.split(' ')[1];
+      
+      // Check if event contains client name patterns
+      if (title.includes(fullName)) {
+        return { pattern: fullName, matchType: 'contains' as const };
+      } else if (title.includes(firstName) && firstName.length > 2) {
+        return { pattern: firstName, matchType: 'contains' as const };
+      } else if (lastName && title.includes(lastName) && lastName.length > 2) {
+        return { pattern: lastName, matchType: 'contains' as const };
+      }
+    }
+    
+    // Check for common therapy-related patterns
+    const commonPatterns = [
+      { pattern: 'therapy', matchType: 'contains' as const },
+      { pattern: 'session', matchType: 'contains' as const },
+      { pattern: 'appointment', matchType: 'contains' as const },
+      { pattern: 'consultation', matchType: 'contains' as const },
+    ];
+    
+    for (const { pattern, matchType } of commonPatterns) {
+      if (title.includes(pattern)) {
+        return { pattern, matchType };
+      }
+    }
+    
+    // Default to the event title with contains matching
+    return { pattern: eventTitle, matchType: 'contains' as const };
+  };
+
+  const handleCreateAlias = (reviewId: string) => {
+    const review = reviews.find((r: CalendarEventReview) => r.id === reviewId);
+    const assignedClient = getAssignedClient(review);
+    
+    if (review && assignedClient) {
+      const suggestion = autoSuggestPattern(
+        review.eventTitle, 
+        `${assignedClient.firstName} ${assignedClient.lastName}`
+      );
+      
+      setAliasPattern(suggestion.pattern);
+      setAliasMatchType(suggestion.matchType);
+      setAliasClientId(assignedClient.id);
+      setAliasNotes(`Auto-created from calendar review: ${review.eventTitle}`);
+      setCreateAliasDialogOpen(reviewId);
+    }
+  };
+
+  const handleSubmitAlias = () => {
+    const reviewId = createAliasDialogOpen;
+    const review = reviews.find((r: CalendarEventReview) => r.id === reviewId);
+    
+    if (!aliasPattern || !aliasClientId) {
+      toast({
+        title: "Missing Information",
+        description: "Please provide both a pattern and select a client",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    createAliasMutation.mutate({
+      aliasPattern,
+      matchType: aliasMatchType,
+      clientId: aliasClientId,
+      isActive: aliasIsActive,
+      notes: aliasNotes || undefined,
+      createdFromEventId: review?.eventId,
+    });
   };
 
   const getClientFullName = (client: Client) => `${client.firstName} ${client.lastName}`;
@@ -407,6 +538,17 @@ export default function CalendarReviews() {
                       >
                         Reject
                       </Button>
+                      {assignedClient && (
+                        <Button
+                          variant="outline"
+                          onClick={() => handleCreateAlias(review.id)}
+                          disabled={createAliasMutation.isPending}
+                          data-testid={`create-alias-button-${review.id}`}
+                        >
+                          <Link className="h-4 w-4 mr-2" />
+                          Create Alias
+                        </Button>
+                      )}
                       <Button
                         onClick={() => handleApproveEvent(review.id)}
                         disabled={approveEventMutation.isPending}
@@ -421,6 +563,128 @@ export default function CalendarReviews() {
             })}
           </div>
         </>
+      )}
+
+      {/* Create Alias Dialog */}
+      {createAliasDialogOpen && (
+        <Dialog open={!!createAliasDialogOpen} onOpenChange={() => setCreateAliasDialogOpen(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Create Event Alias</DialogTitle>
+              <DialogDescription>
+                Create a pattern to automatically match similar calendar events to this client in future syncs.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="aliasPattern">Pattern</Label>
+                <Input
+                  id="aliasPattern"
+                  value={aliasPattern}
+                  onChange={(e) => setAliasPattern(e.target.value)}
+                  placeholder="Pattern to match against event titles"
+                  data-testid="input-alias-pattern"
+                />
+                <p className="text-sm text-muted-foreground mt-1">
+                  This pattern will be used to match similar calendar events
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="aliasMatchType">Match Type</Label>
+                  <Select
+                    value={aliasMatchType}
+                    onValueChange={(value) => setAliasMatchType(value as any)}
+                  >
+                    <SelectTrigger data-testid="select-alias-match-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="exact">Exact Match</SelectItem>
+                      <SelectItem value="contains">Contains</SelectItem>
+                      <SelectItem value="starts_with">Starts With</SelectItem>
+                      <SelectItem value="ends_with">Ends With</SelectItem>
+                      <SelectItem value="regex">Regular Expression</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="aliasClient">Client</Label>
+                  <Select
+                    value={aliasClientId}
+                    onValueChange={setAliasClientId}
+                  >
+                    <SelectTrigger data-testid="select-alias-client">
+                      <SelectValue placeholder="Select client" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clients.map((client: Client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {getClientFullName(client)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="aliasNotes">Notes (Optional)</Label>
+                <Textarea
+                  id="aliasNotes"
+                  value={aliasNotes}
+                  onChange={(e) => setAliasNotes(e.target.value)}
+                  placeholder="Optional notes about this alias..."
+                  data-testid="textarea-alias-notes"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="aliasIsActive"
+                  checked={aliasIsActive}
+                  onCheckedChange={setAliasIsActive}
+                  data-testid="switch-alias-active"
+                />
+                <Label htmlFor="aliasIsActive">Active</Label>
+                <p className="text-sm text-muted-foreground">
+                  Active aliases will be used for automatic matching
+                </p>
+              </div>
+
+              {/* Pattern Explanation */}
+              <div className="p-3 bg-muted rounded-lg">
+                <h4 className="text-sm font-medium mb-2">Pattern Explanation</h4>
+                <p className="text-sm text-muted-foreground">
+                  {aliasMatchType === 'exact' && `Event title must match "${aliasPattern}" exactly`}
+                  {aliasMatchType === 'contains' && `Event title must contain "${aliasPattern}"`}
+                  {aliasMatchType === 'starts_with' && `Event title must start with "${aliasPattern}"`}
+                  {aliasMatchType === 'ends_with' && `Event title must end with "${aliasPattern}"`}
+                  {aliasMatchType === 'regex' && `Event title must match the regular expression: ${aliasPattern}`}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setCreateAliasDialogOpen(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmitAlias}
+                disabled={createAliasMutation.isPending || !aliasPattern || !aliasClientId}
+                data-testid="button-submit-alias"
+              >
+                {createAliasMutation.isPending ? "Creating..." : "Create Alias"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

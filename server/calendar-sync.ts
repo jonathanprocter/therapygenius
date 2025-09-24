@@ -759,10 +759,97 @@ class CalendarSyncService {
   }
 
   /**
-   * Use AI to match calendar event to existing client
+   * Check aliases for automatic matching
+   */
+  private async checkAliases(eventTitle: string, therapistId: string): Promise<ClientMatch | null> {
+    try {
+      const allAliases = await storage.getCalendarEventAliases(therapistId);
+      const aliases = allAliases.filter(alias => alias.isActive); // Only active aliases
+      
+      for (const alias of aliases) {
+        const isMatch = this.testAliasPattern(eventTitle, alias.aliasPattern, alias.matchType);
+        
+        if (isMatch) {
+          // Client information is already joined in the alias result
+          const client = alias.client;
+          if (!client) {
+            console.warn(`[Calendar Sync] [ALIAS] Alias ${alias.id} references non-existent client ${alias.clientId}`);
+            continue;
+          }
+          
+          console.log(`[Calendar Sync] [ALIAS] Event "${eventTitle}" matched alias "${alias.aliasPattern}" (${alias.matchType}) for client ${client.firstName} ${client.lastName}`);
+          this.logAuditEvent('alias_match_found', therapistId, true, `Alias: ${alias.aliasPattern}, Client: ${client.firstName} ${client.lastName}`);
+          
+          return {
+            clientId: alias.clientId,
+            confidence: 1.0, // Aliases have highest confidence
+            matchReason: `alias_${alias.matchType}`,
+            client: {
+              id: client.id,
+              firstName: client.firstName,
+              lastName: client.lastName,
+              email: client.email || undefined
+            }
+          };
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('[Calendar Sync] [ALIAS] Error checking aliases:', error);
+      this.logAuditEvent('alias_check_error', therapistId, false, error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
+
+  /**
+   * Test if an event title matches an alias pattern
+   */
+  private testAliasPattern(eventTitle: string, pattern: string, matchType: string): boolean {
+    const title = eventTitle.toLowerCase().trim();
+    const testPattern = pattern.toLowerCase().trim();
+    
+    switch (matchType) {
+      case 'exact':
+        return title === testPattern;
+      
+      case 'contains':
+        return title.includes(testPattern);
+      
+      case 'starts_with':
+        return title.startsWith(testPattern);
+      
+      case 'ends_with':
+        return title.endsWith(testPattern);
+      
+      case 'regex':
+        try {
+          const regex = new RegExp(pattern, 'i'); // Case-insensitive by default
+          return regex.test(title);
+        } catch (error) {
+          console.error(`[Calendar Sync] [ALIAS] Invalid regex pattern: ${pattern}`, error);
+          return false;
+        }
+      
+      default:
+        console.warn(`[Calendar Sync] [ALIAS] Unknown match type: ${matchType}`);
+        return false;
+    }
+  }
+
+  /**
+   * Use aliases first, then AI to match calendar event to existing client
    */
   private async matchEventToClient(event: CalendarEvent, therapistId: string): Promise<ClientMatch | null> {
     try {
+      const eventTitle = event.summary || '';
+      
+      // STEP 1: Check aliases FIRST (deterministic, highest priority)
+      const aliasMatch = await this.checkAliases(eventTitle, therapistId);
+      if (aliasMatch) {
+        return aliasMatch;
+      }
+
       // Get all clients for fuzzy matching
       const clients = await storage.getClientsByTherapist(therapistId);
       
@@ -772,7 +859,7 @@ class CalendarSyncService {
 
       // Extract relevant information from calendar event
       const eventInfo = {
-        title: event.summary || '',
+        title: eventTitle,
         description: event.description || '',
         attendees: event.attendees?.map(a => ({
           email: a.email,
@@ -781,13 +868,13 @@ class CalendarSyncService {
         location: event.location || ''
       };
 
-      // Try direct name matching first
+      // STEP 2: Try direct name matching
       const directMatch = this.findDirectMatch(eventInfo, clients);
       if (directMatch) {
         return directMatch;
       }
 
-      // Use AI for intelligent matching
+      // STEP 3: Use AI for intelligent matching
       const aiMatch = await this.findAIMatch(eventInfo, clients, therapistId);
       if (aiMatch) {
         return aiMatch;

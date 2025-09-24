@@ -9,6 +9,7 @@ import {
   rateLimitCounters,
   calendarSyncHistory,
   calendarEventReviews,
+  calendarEventAliases,
   type User,
   type InsertUser,
   type Client,
@@ -29,6 +30,8 @@ import {
   type InsertCalendarSyncHistory,
   type CalendarEventReview,
   type InsertCalendarEventReview,
+  type CalendarEventAlias,
+  type InsertCalendarEventAlias,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, like, or, sql, gte, lte, isNull } from "drizzle-orm";
@@ -153,6 +156,15 @@ export interface IStorage {
   updateCalendarEventReview(id: string, updates: Partial<CalendarEventReview>, therapistId: string): Promise<CalendarEventReview | null>;
   deleteCalendarEventReview(id: string, therapistId: string): Promise<boolean>;
   getPendingReviewCount(therapistId: string): Promise<number>;
+  
+  // Calendar Event Alias methods - Persistent patterns for automatic event-to-client matching
+  getCalendarEventAliases(therapistId: string): Promise<Array<CalendarEventAlias & { client: Client }>>;
+  getCalendarEventAliasById(id: string, therapistId: string): Promise<CalendarEventAlias | null>;
+  createCalendarEventAlias(alias: InsertCalendarEventAlias): Promise<CalendarEventAlias>;
+  updateCalendarEventAlias(id: string, updates: Partial<CalendarEventAlias>, therapistId: string): Promise<CalendarEventAlias | null>;
+  deleteCalendarEventAlias(id: string, therapistId: string): Promise<boolean>;
+  testAliasPattern(pattern: string, matchType: string, testText: string): Promise<boolean>;
+  findMatchingAlias(eventTitle: string, therapistId: string): Promise<CalendarEventAlias | null>;
   
   // HIPAA Audit logging methods
   createAuditLog(auditLog: InsertAuditLog): Promise<AuditLog>;
@@ -866,6 +878,122 @@ export class DatabaseStorage implements IStorage {
       );
 
     return result?.count || 0;
+  }
+
+  // Calendar Event Alias implementations - Persistent patterns for automatic event-to-client matching
+  async getCalendarEventAliases(therapistId: string): Promise<Array<CalendarEventAlias & { client: Client }>> {
+    return db
+      .select({
+        id: calendarEventAliases.id,
+        therapistId: calendarEventAliases.therapistId,
+        aliasPattern: calendarEventAliases.aliasPattern,
+        matchType: calendarEventAliases.matchType,
+        clientId: calendarEventAliases.clientId,
+        isActive: calendarEventAliases.isActive,
+        createdFromEventId: calendarEventAliases.createdFromEventId,
+        notes: calendarEventAliases.notes,
+        createdAt: calendarEventAliases.createdAt,
+        updatedAt: calendarEventAliases.updatedAt,
+        client: clients,
+      })
+      .from(calendarEventAliases)
+      .innerJoin(clients, eq(calendarEventAliases.clientId, clients.id))
+      .where(eq(calendarEventAliases.therapistId, therapistId))
+      .orderBy(desc(calendarEventAliases.updatedAt));
+  }
+
+  async getCalendarEventAliasById(id: string, therapistId: string): Promise<CalendarEventAlias | null> {
+    const [alias] = await db
+      .select()
+      .from(calendarEventAliases)
+      .where(
+        and(
+          eq(calendarEventAliases.id, id),
+          eq(calendarEventAliases.therapistId, therapistId)
+        )
+      );
+    return alias || null;
+  }
+
+  async createCalendarEventAlias(alias: InsertCalendarEventAlias): Promise<CalendarEventAlias> {
+    const [newAlias] = await db
+      .insert(calendarEventAliases)
+      .values(alias)
+      .returning();
+    return newAlias;
+  }
+
+  async updateCalendarEventAlias(id: string, updates: Partial<CalendarEventAlias>, therapistId: string): Promise<CalendarEventAlias | null> {
+    const [updatedAlias] = await db
+      .update(calendarEventAliases)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(
+        and(
+          eq(calendarEventAliases.id, id),
+          eq(calendarEventAliases.therapistId, therapistId)
+        )
+      )
+      .returning();
+    return updatedAlias || null;
+  }
+
+  async deleteCalendarEventAlias(id: string, therapistId: string): Promise<boolean> {
+    const result = await db
+      .delete(calendarEventAliases)
+      .where(
+        and(
+          eq(calendarEventAliases.id, id),
+          eq(calendarEventAliases.therapistId, therapistId)
+        )
+      );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async testAliasPattern(pattern: string, matchType: string, testText: string): Promise<boolean> {
+    const lowerPattern = pattern.toLowerCase();
+    const lowerTestText = testText.toLowerCase();
+
+    switch (matchType) {
+      case 'exact':
+        return lowerTestText === lowerPattern;
+      case 'contains':
+        return lowerTestText.includes(lowerPattern);
+      case 'starts_with':
+        return lowerTestText.startsWith(lowerPattern);
+      case 'ends_with':
+        return lowerTestText.endsWith(lowerPattern);
+      case 'regex':
+        try {
+          const regex = new RegExp(pattern, 'i');
+          return regex.test(testText);
+        } catch {
+          return false; // Invalid regex
+        }
+      default:
+        return false;
+    }
+  }
+
+  async findMatchingAlias(eventTitle: string, therapistId: string): Promise<CalendarEventAlias | null> {
+    const aliases = await db
+      .select()
+      .from(calendarEventAliases)
+      .where(
+        and(
+          eq(calendarEventAliases.therapistId, therapistId),
+          eq(calendarEventAliases.isActive, true)
+        )
+      )
+      .orderBy(desc(calendarEventAliases.updatedAt));
+
+    for (const alias of aliases) {
+      const matches = await this.testAliasPattern(alias.aliasPattern, alias.matchType, eventTitle);
+      if (matches) {
+        return alias;
+      }
+    }
+
+    return null;
   }
 
   // Calendar Sync History implementations - Detailed sync outcome tracking
