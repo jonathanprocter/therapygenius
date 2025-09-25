@@ -46,6 +46,24 @@ export default function CalendarSettings() {
   const [activeTab, setActiveTab] = useState('sync-frequency');
   const { toast } = useToast();
 
+  // AI Settings state
+  const [settings, setSettings] = useState({
+    clientMatching: true,
+    confidenceThreshold: 0.7,
+    enableHipaaMode: true,
+    enableAuditLogging: true
+  });
+
+  // Handle AI settings changes
+  const handleSettingChange = (key: string, value: any) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+    // You can add a mutation here to save to backend if needed
+    toast({
+      title: "Setting Updated",
+      description: `${key} has been updated successfully.`,
+    });
+  };
+
   // Get sync preferences
   const { data: syncPreferences, isLoading: preferencesLoading, refetch: refetchPreferences } = useQuery({
     queryKey: ['/api/calendar/sync-preferences'],
