@@ -77,8 +77,15 @@ export default function ClientChart() {
     );
   }
 
+  // Using Eastern Time formatting utilities for consistent timezone display
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
+    const dateObj = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    return dateObj.toLocaleDateString('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
   };
 
   const getScoreTrend = (scores: any[]) => {

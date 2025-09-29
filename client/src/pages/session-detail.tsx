@@ -27,6 +27,7 @@ import { SessionAITags } from '@/components/SessionAITags';
 import { DocumentAutoLinking } from '@/components/DocumentAutoLinking';
 import { SessionDocumentUpload } from '@/components/SessionDocumentUpload';
 import type { Session, Document } from '@shared/schema';
+import { formatDateEastern, formatTimeEastern } from '@/lib/utils';
 
 export default function SessionDetail() {
   const { id } = useParams();
@@ -85,12 +86,13 @@ export default function SessionDetail() {
     );
   }
 
+  // Using Eastern Time formatting utilities for consistent timezone display
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
+    return formatDateEastern(dateString);
   };
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatTimeEastern(dateString);
   };
 
   const formatDuration = (minutes?: number) => {

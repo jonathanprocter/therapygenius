@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@shared/schema';
+import { formatDateEastern, formatTimeEastern } from '@/lib/utils';
 
 interface SessionWithClient extends Session {
   clientName: string;
@@ -40,20 +41,13 @@ export default function Sessions() {
     );
   }) || [];
 
+  // Using Eastern Time formatting utilities for consistent timezone display
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return formatDateEastern(dateString);
   };
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
+    return formatTimeEastern(dateString);
   };
 
   const formatDuration = (minutes?: number) => {

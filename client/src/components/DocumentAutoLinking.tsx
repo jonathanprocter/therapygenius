@@ -143,8 +143,18 @@ export function DocumentAutoLinking({ document, className }: DocumentAutoLinking
     return 'Low Confidence';
   };
 
+  // Using Eastern Time formatting utilities for consistent timezone display  
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+    const dateObj = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    return dateObj.toLocaleString('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
   };
 
   const isCalendarLinked = document.sourceEventId || document.metadata?.sourceCalendar;
