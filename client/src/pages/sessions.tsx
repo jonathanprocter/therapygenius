@@ -72,6 +72,18 @@ export default function Sessions() {
     return notes.replace(calendarImportPattern, '').trim();
   };
 
+  const getCleanSessionTitle = (session: SessionWithClient) => {
+    // If the session has notes that look like calendar import text, extract the clean appointment name
+    if (session.notes && session.notes.includes('Imported from Google Calendar')) {
+      const cleanedNotes = cleanCalendarImportText(session.notes);
+      // If the cleaned notes look like an appointment name, use that instead of client name
+      if (cleanedNotes && cleanedNotes.includes('Appointment')) {
+        return cleanedNotes.replace(' Appointment', '');
+      }
+    }
+    return session.clientName;
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6" data-testid="sessions-loading">
@@ -188,7 +200,7 @@ export default function Sessions() {
                     <div className="flex items-start justify-between">
                       <div>
                         <h3 className="text-lg font-semibold flex items-center space-x-2">
-                          <span data-testid={`session-client-${session.id}`}>{session.clientName}</span>
+                          <span data-testid={`session-client-${session.id}`}>{getCleanSessionTitle(session)}</span>
                           {session.externalEventId && (
                             <Badge variant="outline" className="text-xs">
                               <ExternalLink className="w-3 h-3 mr-1" />
