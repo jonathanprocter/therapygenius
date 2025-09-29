@@ -374,7 +374,7 @@ export function DocumentAutoLinking({ document, className }: DocumentAutoLinking
         )}
 
         {/* Errors */}
-        {metadata.errors.length > 0 && (
+        {metadata.errors && metadata.errors.length > 0 && (
           <Alert variant="destructive" data-testid="linking-errors">
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
