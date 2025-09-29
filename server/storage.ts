@@ -634,8 +634,20 @@ export class DatabaseStorage implements IStorage {
     documentsProcessed: number;
     completedGoals: { completed: number; total: number };
   }> {
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    // Calculate current week start and end in Eastern Time
+    const now = new Date();
+    const easternOffset = -5; // EST is UTC-5 (simplified, doesn't account for DST)
+    
+    // Get start of current week (Sunday) in Eastern Time
+    const easternNow = new Date(now.getTime() + (easternOffset * 60 * 60 * 1000));
+    const startOfWeek = new Date(easternNow);
+    startOfWeek.setDate(easternNow.getDate() - easternNow.getDay()); // Sunday
+    startOfWeek.setHours(0, 0, 0, 0);
+    
+    // Get end of current week (Saturday 11:59:59 PM)
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
 
     // Active clients count
     const [activeClientsResult] = await db
@@ -643,14 +655,15 @@ export class DatabaseStorage implements IStorage {
       .from(clients)
       .where(eq(clients.therapistId, therapistId));
 
-    // Sessions this week
+    // Sessions this week (current calendar week in Eastern Time)
     const [weekSessionsResult] = await db
       .select({ count: sql<number>`count(*)` })
       .from(sessions)
       .where(
         and(
           eq(sessions.therapistId, therapistId),
-          sql`${sessions.sessionDate} >= ${oneWeekAgo}`
+          sql`${sessions.sessionDate} >= ${startOfWeek}`,
+          sql`${sessions.sessionDate} <= ${endOfWeek}`
         )
       );
 
