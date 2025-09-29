@@ -558,6 +558,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Retry AI analysis for a single document
+  app.post("/api/documents/:id/retry-analysis", async (req: Request, res) => {
+    try {
+      const document = await storage.getDocumentById(req.params.id, THERAPIST_ID);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      console.log(`[Retry Analysis] Starting retry for document ${document.id}: ${document.fileName}`);
+
+      // Re-analyze with auto-linking
+      const context: DocumentUploadContext = {
+        therapistId: THERAPIST_ID,
+        clientId: document.clientId || undefined
+      };
+
+      const autoLinkingResult = await processDocumentWithAutoLinking(document, context);
+      
+      console.log(`[Retry Analysis] Completed for document ${document.id}:`, {
+        status: autoLinkingResult.processingStatus,
+        sessionMatch: autoLinkingResult.sessionMatch ? `Session ${autoLinkingResult.sessionMatch.sessionId}` : 'No match',
+        analysisResults: autoLinkingResult.analysisResults ? 'Success' : 'Failed',
+        errors: autoLinkingResult.errors?.length || 0
+      });
+
+      res.json({ 
+        documentId: document.id,
+        fileName: document.fileName,
+        status: autoLinkingResult.processingStatus,
+        autoLinkingResult
+      });
+    } catch (error) {
+      console.error("Error retrying document analysis:", error);
+      res.status(500).json({ 
+        message: "Failed to retry document analysis",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Session routes
   app.get("/api/sessions/client/:clientId", async (req: Request, res) => {
     try {

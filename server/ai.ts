@@ -337,11 +337,34 @@ class AIRouter {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  /**
+   * Recursively convert null values to undefined for Zod compatibility
+   */
+  private preprocessForValidation(obj: any): any {
+    if (obj === null) {
+      return undefined;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.preprocessForValidation(item));
+    }
+    if (typeof obj === 'object' && obj !== null) {
+      const processed: any = {};
+      for (const [key, value] of Object.entries(obj)) {
+        processed[key] = this.preprocessForValidation(value);
+      }
+      return processed;
+    }
+    return obj;
+  }
+
   private validateJsonOutput<T>(output: any, schema?: z.ZodSchema<T>): T {
     if (schema) {
       try {
-        return schema.parse(output);
+        // Preprocess to convert null values to undefined for Zod compatibility
+        const preprocessedOutput = this.preprocessForValidation(output);
+        return schema.parse(preprocessedOutput);
       } catch (error) {
+        console.error('[AI Router] JSON validation failed. Original output:', JSON.stringify(output, null, 2));
         throw new Error(`JSON validation failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }

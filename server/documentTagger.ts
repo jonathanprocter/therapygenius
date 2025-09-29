@@ -29,24 +29,24 @@ const documentAnalysisSchema = z.object({
   keyInsights: z.array(z.string()),
   // Enhanced fields for auto-linking
   sessionContext: z.object({
-    likelySessionType: z.enum(["individual", "group", "family", "assessment", "unknown"]).optional(),
-    suggestedSessionDate: z.string().optional(),
-    sessionKeywords: z.array(z.string()).optional(),
-    therapyPhase: z.enum(["intake", "ongoing", "termination", "unknown"]).optional(),
-    urgencyLevel: z.enum(["low", "medium", "high", "crisis"]).optional()
+    likelySessionType: z.enum(["individual", "group", "family", "assessment", "unknown"]).nullable().optional(),
+    suggestedSessionDate: z.string().nullable().optional(),
+    sessionKeywords: z.array(z.string()).nullable().optional(),
+    therapyPhase: z.enum(["intake", "ongoing", "termination", "unknown"]).nullable().optional(),
+    urgencyLevel: z.enum(["low", "medium", "high", "crisis"]).nullable().optional()
   }).optional(),
   linkingHints: z.object({
-    timeReferences: z.array(z.string()).optional(),
-    appointmentMentions: z.array(z.string()).optional(),
-    sessionNumbers: z.array(z.string()).optional(),
-    followUpReferences: z.array(z.string()).optional()
+    timeReferences: z.array(z.string()).nullable().optional(),
+    appointmentMentions: z.array(z.string()).nullable().optional(),
+    sessionNumbers: z.array(z.string()).nullable().optional(),
+    followUpReferences: z.array(z.string()).nullable().optional()
   }).optional(),
   therapyConcepts: z.object({
-    therapeuticApproaches: z.array(z.string()).optional(),
-    clinicalTerms: z.array(z.string()).optional(),
-    progressIndicators: z.array(z.string()).optional(),
-    riskFactors: z.array(z.string()).optional(),
-    strengthsIdentified: z.array(z.string()).optional()
+    therapeuticApproaches: z.array(z.string()).nullable().optional(),
+    clinicalTerms: z.array(z.string()).nullable().optional(),
+    progressIndicators: z.array(z.string()).nullable().optional(),
+    riskFactors: z.array(z.string()).nullable().optional(),
+    strengthsIdentified: z.array(z.string()).nullable().optional()
   }).optional()
 });
 
@@ -239,24 +239,17 @@ Respond with JSON array:
 Only include sessions with confidence > 0.3. Sort by confidence (highest first).
 `;
 
+    // Define proper Zod schema for session matching results
+    const sessionMatchingSchema = z.array(z.object({
+      sessionId: z.string(),
+      confidence: z.number().min(0).max(1),
+      matchReason: z.string(),
+      matchingFactors: z.array(z.string())
+    }));
+
     const matchingResults = await aiRouter.chatJSON(
       [{ role: "user", content: sessionMatchingPrompt }],
-      {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            sessionId: { type: "string" },
-            confidence: { type: "number", minimum: 0, maximum: 1 },
-            matchReason: { type: "string" },
-            matchingFactors: { 
-              type: "array", 
-              items: { type: "string" }
-            }
-          },
-          required: ["sessionId", "confidence", "matchReason", "matchingFactors"]
-        }
-      } as any,
+      sessionMatchingSchema,
       {
         systemPrompt: "You are an expert at matching therapy documents to sessions. Always respond with valid JSON.",
         maxTokens: 1500
@@ -323,25 +316,21 @@ Respond with JSON:
 For suggestedEventWindow, provide a 48-hour window around the most likely event date if one can be determined.
 `;
 
+    // Define proper Zod schema for calendar analysis results
+    const calendarAnalysisSchema = z.object({
+      extractedDates: z.array(z.string()),
+      appointmentReferences: z.array(z.string()),
+      timeReferences: z.array(z.string()),
+      calendarKeywords: z.array(z.string()),
+      suggestedEventWindow: z.object({
+        start: z.string(),
+        end: z.string()
+      }).optional()
+    });
+
     const calendarAnalysis = await aiRouter.chatJSON(
       [{ role: "user", content: calendarPrompt }],
-      {
-        type: "object",
-        properties: {
-          extractedDates: { type: "array", items: { type: "string" } },
-          appointmentReferences: { type: "array", items: { type: "string" } },
-          timeReferences: { type: "array", items: { type: "string" } },
-          calendarKeywords: { type: "array", items: { type: "string" } },
-          suggestedEventWindow: {
-            type: "object",
-            properties: {
-              start: { type: "string" },
-              end: { type: "string" }
-            }
-          }
-        },
-        required: ["extractedDates", "appointmentReferences", "timeReferences", "calendarKeywords"]
-      } as any,
+      calendarAnalysisSchema,
       {
         systemPrompt: "You are an expert at extracting calendar and appointment information from documents.",
         maxTokens: 800
