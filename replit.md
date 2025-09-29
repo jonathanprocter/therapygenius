@@ -78,3 +78,8 @@ The authentication system supports both header-based and cookie-based token vali
 - **PostCSS**: CSS processing with Tailwind and Autoprefixer
 
 The system is designed to be highly scalable with serverless database connections and modular AI service integrations that can be easily swapped or extended based on requirements.
+
+# Recent Changes
+
+## September 29, 2025
+- **Richard Hayes Comprehensive Session Upload**: Successfully uploaded complete therapeutic record with 10 detailed therapy sessions from 2024 (April-August), including comprehensive progress notes and structured AI tags for longitudinal case conceptualization. All sessions standardized with consistent schema and proper JSON formatting for advanced analytics and clinical insights tracking.
