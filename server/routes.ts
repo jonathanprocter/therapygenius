@@ -586,6 +586,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/sessions - Get all sessions with client names
+  app.get("/api/sessions", async (req: Request, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const sessionsWithClients = await storage.getSessionsWithClients(THERAPIST_ID, limit);
+      res.json(sessionsWithClients);
+    } catch (error) {
+      console.error("Error fetching sessions:", error);
+      res.status(500).json({ message: "Failed to fetch sessions" });
+    }
+  });
+
   // GET /api/sessions/today - Get today's sessions (must come before :id route)
   app.get("/api/sessions/today", async (req: Request, res) => {
     try {

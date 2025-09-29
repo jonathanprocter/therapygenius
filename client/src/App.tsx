@@ -11,6 +11,7 @@ import { useState } from "react";
 import Dashboard from "@/pages/dashboard";
 import ClientChart from "@/pages/client-chart";
 import SessionDetail from "@/pages/session-detail";
+import Sessions from "@/pages/sessions";
 import Documents from "@/pages/documents";
 import Clients from "@/pages/clients";
 import CalendarSettings from "@/pages/calendar-settings";
@@ -239,6 +240,7 @@ function MainApp() {
             <Route path="/" component={Dashboard} />
             <Route path="/client-chart/:id" component={ClientChart} />
             <Route path="/session/:id" component={SessionDetail} />
+            <Route path="/sessions" component={Sessions} />
             <Route path="/documents" component={Documents} />
             <Route path="/clients" component={Clients} />
             <Route path="/calendar/settings" component={CalendarSettings} />

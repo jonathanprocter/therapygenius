@@ -39,7 +39,7 @@ export function useUploadDocuments() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ files, clientId }: { files: FileList; clientId?: string }) => {
+    mutationFn: async ({ files, clientId, sessionId }: { files: FileList; clientId?: string; sessionId?: string }) => {
       const formData = new FormData();
       
       Array.from(files).forEach(file => {
@@ -48,6 +48,10 @@ export function useUploadDocuments() {
       
       if (clientId) {
         formData.append("clientId", clientId);
+      }
+      
+      if (sessionId) {
+        formData.append("sessionId", sessionId);
       }
 
       // Handle file upload with CSRF token
@@ -85,6 +89,10 @@ export function useUploadDocuments() {
       // Also invalidate client-specific documents if uploading for a specific client
       if (variables.clientId) {
         queryClient.invalidateQueries({ queryKey: ["/api/documents/client", variables.clientId] });
+      }
+      
+      if (variables.sessionId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/sessions", variables.sessionId] });
       }
 
       // Enhanced success messaging based on processing results

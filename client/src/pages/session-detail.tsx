@@ -25,6 +25,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { SessionAITags } from '@/components/SessionAITags';
 import { DocumentAutoLinking } from '@/components/DocumentAutoLinking';
+import { SessionDocumentUpload } from '@/components/SessionDocumentUpload';
 import type { Session, Document } from '@shared/schema';
 
 export default function SessionDetail() {
@@ -422,6 +423,16 @@ export default function SessionDetail() {
 
             {/* Documents Tab */}
             <TabsContent value="documents" className="space-y-6">
+              {/* Document Upload Section */}
+              <SessionDocumentUpload 
+                sessionId={session.id}
+                clientId={session.clientId}
+                onUploadComplete={() => {
+                  // Refresh session documents when upload completes
+                  window.location.reload();
+                }}
+              />
+              
               {hasDocuments ? (
                 <div className="space-y-4">
                   {/* Linked Documents */}
@@ -465,21 +476,17 @@ export default function SessionDetail() {
                   )}
                 </div>
               ) : (
-                <Card>
-                  <CardContent className="text-center py-12">
-                    <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-medium mb-2">No Documents Available</h3>
-                    <p className="text-muted-foreground mb-4">
-                      No documents are associated with this session yet.
-                    </p>
-                    <Link href="/documents">
-                      <Button data-testid="manage-documents">
-                        <FileText className="w-4 h-4 mr-2" />
-                        Manage Documents
-                      </Button>
-                    </Link>
-                  </CardContent>
-                </Card>
+                <div className="space-y-4">
+                  <Card>
+                    <CardContent className="text-center py-8">
+                      <FileText className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                      <h4 className="text-lg font-medium mb-2">No Documents Linked Yet</h4>
+                      <p className="text-muted-foreground text-sm">
+                        Upload documents above or link existing documents from your document library.
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
               )}
             </TabsContent>
 

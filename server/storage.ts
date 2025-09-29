@@ -431,6 +431,37 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async getSessionsWithClients(therapistId: string, limit = 100): Promise<Array<Session & { clientName: string }>> {
+    const result = await db
+      .select({
+        // Session fields
+        id: sessions.id,
+        clientId: sessions.clientId,
+        therapistId: sessions.therapistId,
+        sessionDate: sessions.sessionDate,
+        duration: sessions.duration,
+        sessionType: sessions.sessionType,
+        notes: sessions.notes,
+        interventionsUsed: sessions.interventionsUsed,
+        homework: sessions.homework,
+        nextSessionPlan: sessions.nextSessionPlan,
+        externalEventId: sessions.externalEventId,
+        sourceCalendar: sessions.sourceCalendar,
+        aiTags: sessions.aiTags,
+        createdAt: sessions.createdAt,
+        updatedAt: sessions.updatedAt,
+        // Client name
+        clientName: sql<string>`CONCAT(${clients.firstName}, ' ', ${clients.lastName})`
+      })
+      .from(sessions)
+      .innerJoin(clients, eq(sessions.clientId, clients.id))
+      .where(eq(sessions.therapistId, therapistId))
+      .orderBy(desc(sessions.sessionDate))
+      .limit(limit);
+
+    return result;
+  }
+
   async getTodaysSessions(therapistId: string): Promise<Array<Session & { clientName: string }>> {
     // Get current date in Eastern timezone
     const easternToday = new Date();
