@@ -66,6 +66,12 @@ export default function Sessions() {
     return `${mins}m`;
   };
 
+  const cleanCalendarImportText = (notes: string) => {
+    // Remove verbose calendar import information and just show the appointment name
+    const calendarImportPattern = /^Imported from Google Calendar \([^)]+\):\s*/;
+    return notes.replace(calendarImportPattern, '').trim();
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6" data-testid="sessions-loading">
@@ -222,10 +228,12 @@ export default function Sessions() {
                     {session.notes && (
                       <div className="bg-muted/50 p-3 rounded-lg">
                         <p className="text-sm text-muted-foreground line-clamp-2">
-                          {session.notes.length > 150 
-                            ? `${session.notes.substring(0, 150)}...` 
-                            : session.notes
-                          }
+                          {(() => {
+                            const cleanedNotes = cleanCalendarImportText(session.notes);
+                            return cleanedNotes.length > 150 
+                              ? `${cleanedNotes.substring(0, 150)}...` 
+                              : cleanedNotes;
+                          })()}
                         </p>
                       </div>
                     )}
@@ -242,7 +250,7 @@ export default function Sessions() {
                         {session.sourceCalendar && (
                           <div className="flex items-center space-x-1">
                             <Calendar className="w-3 h-3" />
-                            <span>From {session.sourceCalendar}</span>
+                            <span>From Calendar</span>
                           </div>
                         )}
                       </div>
