@@ -142,7 +142,118 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* AI Insights Section - Prominently Featured */}
+      {/* Today's Schedule - Prominently Featured */}
+      <div className="space-y-4" data-testid="todays-schedule-featured">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <i className="fas fa-calendar-check text-xl text-green-600"></i>
+            <h2 className="text-xl font-semibold">Today's Schedule</h2>
+            <Badge variant="secondary" className="bg-green-100 text-green-800">
+              <i className="fas fa-clock w-3 h-3 mr-1"></i>
+              {formatDateEastern(new Date())} (EST/EDT)
+            </Badge>
+          </div>
+          <Link href="/sessions">
+            <Button variant="outline" size="sm" data-testid="view-all-sessions">
+              <i className="fas fa-calendar w-4 h-4 mr-2"></i>
+              View All Sessions
+            </Button>
+          </Link>
+        </div>
+        
+        {/* Today's Schedule Card */}
+        <Card className="bg-gradient-to-r from-green-50/50 to-blue-50/50 border-green-200/30">
+          <CardContent className="p-6">
+            {sessionsLoading ? (
+              <div className="space-y-4">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-20" />
+                ))}
+              </div>
+            ) : !todaysSessions || todaysSessions.length === 0 ? (
+              <div className="text-center py-8">
+                <i className="fas fa-calendar-alt text-4xl text-muted-foreground mb-4"></i>
+                <p className="text-muted-foreground text-lg font-medium" data-testid="no-sessions-today">No appointments scheduled for today</p>
+                <p className="text-sm text-muted-foreground mt-2">Enjoy your free time!</p>
+              </div>
+            ) : (
+              <div className="space-y-3" data-testid="todays-sessions">
+                {todaysSessions.map((session: any) => (
+                  <div key={session.id} className="border rounded-lg p-4 bg-white/70 hover:bg-white/90 hover:shadow-md transition-all duration-200" data-testid={`session-${session.id}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <Link href={`/client-chart/${session.clientId}`}>
+                            <span className="font-semibold text-lg text-primary hover:underline cursor-pointer" data-testid={`client-link-${session.clientId}`}>
+                              {session.clientName}
+                            </span>
+                          </Link>
+                          {/* Session Source Indicator */}
+                          {session.sourceCalendar && (
+                            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200" data-testid={`calendar-badge-${session.id}`}>
+                              <i className="fas fa-calendar w-2 h-2 mr-1"></i>
+                              From Calendar
+                            </Badge>
+                          )}
+                          {/* AI Session Analysis Indicator */}
+                          {session.aiTags && (
+                            <Badge variant="secondary" className="bg-purple-100 text-purple-700 text-xs">
+                              <Brain className="w-2 h-2 mr-1" />
+                              AI Analyzed
+                            </Badge>
+                          )}
+                          {/* Risk Alert for High-Risk Sessions */}
+                          {session.aiTags?.riskFactors?.suicideRisk && (session.aiTags.riskFactors.suicideRisk === 'high' || session.aiTags.riskFactors.suicideRisk === 'moderate') && (
+                            <Badge variant="destructive" className="text-xs">
+                              <AlertTriangle className="w-2 h-2 mr-1" />
+                              Risk Alert
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-6 text-sm text-muted-foreground">
+                          <div className="flex items-center space-x-2 font-medium" data-testid={`session-time-${session.id}`}>
+                            <i className="fas fa-clock text-green-600"></i>
+                            <span className="text-base">{formatTimeEastern(session.sessionDate)}</span>
+                          </div>
+                          {session.duration && (
+                            <div className="flex items-center space-x-2" data-testid={`session-duration-${session.id}`}>
+                              <i className="fas fa-hourglass-half text-blue-600"></i>
+                              <span>{session.duration} min</span>
+                            </div>
+                          )}
+                          {session.sessionType && (
+                            <Badge variant="secondary" className="text-xs" data-testid={`session-type-${session.id}`}>
+                              {session.sessionType}
+                            </Badge>
+                          )}
+                        </div>
+                        {/* Session Notes Preview */}
+                        {session.notes && (
+                          <div className="mt-3 p-2 bg-muted/30 rounded text-xs text-muted-foreground line-clamp-1">
+                            {session.notes.replace(/^Imported from Google Calendar[^:]*:\s*/, '').substring(0, 80)}...
+                          </div>
+                        )}
+                      </div>
+                      <div className="ml-4">
+                        <Link href={`/session/${session.id}`}>
+                          <Button variant="outline" size="sm">
+                            <i className="fas fa-eye w-3 h-3 mr-2"></i>
+                            View
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        
+        <Separator />
+      </div>
+
+      {/* AI Insights Section */}
       <div className="space-y-4" data-testid="dashboard-ai-insights">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -168,9 +279,9 @@ export default function Dashboard() {
       </div>
 
       {/* Main Dashboard Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Clients */}
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Recent Clients</CardTitle>
@@ -271,80 +382,36 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Today's Schedule */}
+        {/* Quick Actions / Summary Card */}
         <Card>
           <CardHeader>
-            <CardTitle>Today's Schedule</CardTitle>
-            <p className="text-sm text-muted-foreground">{formatDateEastern(new Date())} (EST/EDT)</p>
+            <CardTitle>Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent>
-            {sessionsLoading ? (
-              <div className="space-y-4">
-                {[...Array(3)].map((_, i) => (
-                  <Skeleton key={i} className="h-16" />
-                ))}
-              </div>
-            ) : !todaysSessions || todaysSessions.length === 0 ? (
-              <div className="text-center py-8">
-                <i className="fas fa-calendar-alt text-4xl text-muted-foreground mb-4"></i>
-                <p className="text-muted-foreground" data-testid="no-sessions-today">No appointments scheduled for today</p>
-                <p className="text-xs text-muted-foreground mt-2">Enjoy your free time!</p>
-              </div>
-            ) : (
-              <div className="space-y-3" data-testid="todays-sessions">
-                {todaysSessions.map((session: any) => (
-                  <div key={session.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors" data-testid={`session-${session.id}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <Link href={`/client-chart/${session.clientId}`}>
-                            <span className="font-medium text-primary hover:underline cursor-pointer" data-testid={`client-link-${session.clientId}`}>
-                              {session.clientName}
-                            </span>
-                          </Link>
-                          {/* AI Session Analysis Indicator */}
-                          {session.aiTags && (
-                            <Badge variant="secondary" className="bg-purple-100 text-purple-700 text-xs">
-                              <Brain className="w-2 h-2 mr-1" />
-                              AI Analyzed
-                            </Badge>
-                          )}
-                          {/* Risk Alert for High-Risk Sessions */}
-                          {session.aiTags?.riskFactors?.suicideRisk && (session.aiTags.riskFactors.suicideRisk === 'high' || session.aiTags.riskFactors.suicideRisk === 'moderate') && (
-                            <Badge variant="destructive" className="text-xs">
-                              <AlertTriangle className="w-2 h-2 mr-1" />
-                              Risk Alert
-                            </Badge>
-                          )}
-                          {session.sourceCalendar && (
-                            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200" data-testid={`calendar-badge-${session.id}`}>
-                              From Calendar
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                          <div className="flex items-center space-x-1" data-testid={`session-time-${session.id}`}>
-                            <i className="fas fa-clock text-xs"></i>
-                            <span>{formatTimeEastern(session.sessionDate)}</span>
-                          </div>
-                          {session.duration && (
-                            <div className="flex items-center space-x-1" data-testid={`session-duration-${session.id}`}>
-                              <i className="fas fa-hourglass-half text-xs"></i>
-                              <span>{session.duration} min</span>
-                            </div>
-                          )}
-                          {session.sessionType && (
-                            <Badge variant="secondary" className="text-xs" data-testid={`session-type-${session.id}`}>
-                              {session.sessionType}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <CardContent className="space-y-3">
+            <Link href="/documents">
+              <Button className="w-full justify-start" variant="outline">
+                <i className="fas fa-upload w-4 h-4 mr-2"></i>
+                Upload Documents
+              </Button>
+            </Link>
+            <Link href="/clients">
+              <Button className="w-full justify-start" variant="outline">
+                <i className="fas fa-user-plus w-4 h-4 mr-2"></i>
+                Add New Client
+              </Button>
+            </Link>
+            <Link href="/calendar/sync-dashboard">
+              <Button className="w-full justify-start" variant="outline">
+                <i className="fas fa-sync w-4 h-4 mr-2"></i>
+                Calendar Sync
+              </Button>
+            </Link>
+            <Link href="/sessions">
+              <Button className="w-full justify-start" variant="outline">
+                <i className="fas fa-calendar-alt w-4 h-4 mr-2"></i>
+                View All Sessions
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       </div>
