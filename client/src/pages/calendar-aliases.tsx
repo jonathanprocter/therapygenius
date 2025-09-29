@@ -155,19 +155,15 @@ export default function CalendarAliases() {
   });
 
   // Test pattern mutation
-  const testPatternMutation = useMutation({
+  const testMutation = useMutation({
     mutationFn: async (data: TestFormData) => {
-      return apiRequest("/api/calendar/test-alias", {
+      return apiRequest("/api/calendar/test-pattern", {
         method: "POST",
         body: JSON.stringify(data),
       });
     },
     onSuccess: (result) => {
       setTestResult(result);
-      toast({
-        title: "Pattern Tested",
-        description: result.matches ? "Pattern matches!" : "Pattern does not match",
-      });
     },
     onError: (error: any) => {
       toast({
@@ -178,7 +174,7 @@ export default function CalendarAliases() {
     },
   });
 
-  // Create form
+  // Form setup
   const createForm = useForm<AliasFormData>({
     resolver: zodResolver(aliasFormSchema),
     defaultValues: {
@@ -190,12 +186,10 @@ export default function CalendarAliases() {
     },
   });
 
-  // Edit form
   const editForm = useForm<AliasFormData>({
     resolver: zodResolver(aliasFormSchema),
   });
 
-  // Test form
   const testForm = useForm<TestFormData>({
     resolver: zodResolver(testFormSchema),
     defaultValues: {
@@ -205,6 +199,7 @@ export default function CalendarAliases() {
     },
   });
 
+  // Event handlers
   const onCreateSubmit = (data: AliasFormData) => {
     createAliasMutation.mutate(data);
   };
@@ -216,7 +211,7 @@ export default function CalendarAliases() {
   };
 
   const onTestSubmit = (data: TestFormData) => {
-    testPatternMutation.mutate(data);
+    testMutation.mutate(data);
   };
 
   const handleEdit = (alias: CalendarEventAlias) => {
@@ -234,41 +229,18 @@ export default function CalendarAliases() {
     deleteAliasMutation.mutate(id);
   };
 
-  const getMatchTypeLabel = (matchType: string) => {
-    switch (matchType) {
-      case 'exact': return 'Exact Match';
-      case 'contains': return 'Contains';
-      case 'starts_with': return 'Starts With';
-      case 'ends_with': return 'Ends With';
-      case 'regex': return 'Regex';
-      default: return matchType;
-    }
-  };
-
-  const getMatchTypeDescription = (matchType: string) => {
-    switch (matchType) {
-      case 'exact': return 'Event title must match pattern exactly';
-      case 'contains': return 'Event title must contain the pattern';
-      case 'starts_with': return 'Event title must start with the pattern';
-      case 'ends_with': return 'Event title must end with the pattern';
-      case 'regex': return 'Pattern is treated as a regular expression';
-      default: return '';
-    }
-  };
-
-  if (aliasesLoading) {
+  if (aliasesLoading || clientsLoading) {
     return (
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Calendar Event Aliases</h1>
-            <p className="text-muted-foreground">Manage automatic event-to-client mapping patterns</p>
-          </div>
-          <Skeleton className="h-10 w-32" />
+        <Skeleton className="h-8 w-64" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
         </div>
-        <div className="grid gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-32 w-full" />
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-32" />
           ))}
         </div>
       </div>
@@ -293,6 +265,79 @@ export default function CalendarAliases() {
                 Test Pattern
               </Button>
             </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Test Pattern Matching</DialogTitle>
+                <DialogDescription>
+                  Test how your pattern will match against different calendar event titles
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={testForm.handleSubmit(onTestSubmit)} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="pattern">Pattern</Label>
+                    <Input
+                      id="pattern"
+                      placeholder="e.g., Sarah Johnson"
+                      {...testForm.register("pattern")}
+                      data-testid="input-test-pattern"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="matchType">Match Type</Label>
+                    <Select
+                      value={testForm.watch("matchType")}
+                      onValueChange={(value) => testForm.setValue("matchType", value as any)}
+                    >
+                      <SelectTrigger data-testid="select-test-match-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="exact">Exact Match</SelectItem>
+                        <SelectItem value="contains">Contains</SelectItem>
+                        <SelectItem value="starts_with">Starts With</SelectItem>
+                        <SelectItem value="ends_with">Ends With</SelectItem>
+                        <SelectItem value="regex">Regular Expression</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="testText">Test Text</Label>
+                  <Input
+                    id="testText"
+                    placeholder="e.g., Therapy session with Sarah Johnson"
+                    {...testForm.register("testText")}
+                    data-testid="input-test-text"
+                  />
+                </div>
+                {testResult && (
+                  <div className={`p-3 rounded border ${testResult.matches ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="flex items-center gap-2">
+                      {testResult.matches ? (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-600" />
+                      )}
+                      <span className="font-medium">
+                        {testResult.matches ? 'Match!' : 'No Match'}
+                      </span>
+                    </div>
+                    {testResult.details && (
+                      <p className="text-sm text-muted-foreground mt-1">{testResult.details}</p>
+                    )}
+                  </div>
+                )}
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsTestDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={testMutation.isPending} data-testid="button-run-test">
+                    {testMutation.isPending ? "Testing..." : "Test Pattern"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
           </Dialog>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
@@ -301,6 +346,104 @@ export default function CalendarAliases() {
                 Create Alias
               </Button>
             </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Create New Alias</DialogTitle>
+                <DialogDescription>
+                  Create a pattern to automatically match calendar events to a specific client
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="aliasPattern">Pattern</Label>
+                    <Input
+                      id="aliasPattern"
+                      placeholder="e.g., Sarah Johnson, therapy session"
+                      {...createForm.register("aliasPattern")}
+                      data-testid="input-create-pattern"
+                    />
+                    {createForm.formState.errors.aliasPattern && (
+                      <p className="text-sm text-destructive mt-1">
+                        {createForm.formState.errors.aliasPattern.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="matchType">Match Type</Label>
+                    <Select
+                      value={createForm.watch("matchType")}
+                      onValueChange={(value) => createForm.setValue("matchType", value as any)}
+                    >
+                      <SelectTrigger data-testid="select-create-match-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="exact">Exact Match</SelectItem>
+                        <SelectItem value="contains">Contains</SelectItem>
+                        <SelectItem value="starts_with">Starts With</SelectItem>
+                        <SelectItem value="ends_with">Ends With</SelectItem>
+                        <SelectItem value="regex">Regular Expression</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="clientId">Client</Label>
+                  <Select
+                    value={createForm.watch("clientId")}
+                    onValueChange={(value) => createForm.setValue("clientId", value)}
+                  >
+                    <SelectTrigger data-testid="select-create-client">
+                      <SelectValue placeholder="Select a client" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clients.map((client: Client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.firstName} {client.lastName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {createForm.formState.errors.clientId && (
+                    <p className="text-sm text-destructive mt-1">
+                      {createForm.formState.errors.clientId.message}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="notes">Notes (Optional)</Label>
+                  <Textarea
+                    id="notes"
+                    placeholder="Additional notes about this alias..."
+                    {...createForm.register("notes")}
+                    data-testid="textarea-create-notes"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="isActive"
+                    checked={createForm.watch("isActive")}
+                    onCheckedChange={(checked) => createForm.setValue("isActive", checked)}
+                    data-testid="switch-create-active"
+                  />
+                  <Label htmlFor="isActive">Active</Label>
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createAliasMutation.isPending} data-testid="button-create-submit">
+                    {createAliasMutation.isPending ? "Creating..." : "Create Alias"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
           </Dialog>
         </div>
       </div>
@@ -451,114 +594,6 @@ export default function CalendarAliases() {
         )}
       </div>
 
-      {/* Create Alias Dialog */}
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Create New Alias</DialogTitle>
-          <DialogDescription>
-            Create a pattern to automatically match calendar events to a specific client
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="aliasPattern">Pattern</Label>
-              <Input
-                id="aliasPattern"
-                placeholder="e.g., Sarah Johnson, therapy session"
-                {...createForm.register("aliasPattern")}
-                data-testid="input-create-pattern"
-              />
-              {createForm.formState.errors.aliasPattern && (
-                <p className="text-sm text-destructive mt-1">
-                  {createForm.formState.errors.aliasPattern.message}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="matchType">Match Type</Label>
-              <Select
-                value={createForm.watch("matchType")}
-                onValueChange={(value) => createForm.setValue("matchType", value as any)}
-              >
-                <SelectTrigger data-testid="select-create-match-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="exact">Exact Match</SelectItem>
-                  <SelectItem value="contains">Contains</SelectItem>
-                  <SelectItem value="starts_with">Starts With</SelectItem>
-                  <SelectItem value="ends_with">Ends With</SelectItem>
-                  <SelectItem value="regex">Regular Expression</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="clientId">Client</Label>
-            <Select
-              value={createForm.watch("clientId")}
-              onValueChange={(value) => createForm.setValue("clientId", value)}
-            >
-              <SelectTrigger data-testid="select-create-client">
-                <SelectValue placeholder="Select a client" />
-              </SelectTrigger>
-              <SelectContent>
-                {clients.map((client: Client) => (
-                  <SelectItem key={client.id} value={client.id}>
-                    {client.firstName} {client.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {createForm.formState.errors.clientId && (
-              <p className="text-sm text-destructive mt-1">
-                {createForm.formState.errors.clientId.message}
-              </p>
-            )}
-          </div>
-
-          <div>
-            <Label htmlFor="notes">Notes (Optional)</Label>
-            <Textarea
-              id="notes"
-              placeholder="Optional notes about this alias..."
-              {...createForm.register("notes")}
-              data-testid="textarea-create-notes"
-            />
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="isActive"
-              checked={createForm.watch("isActive")}
-              onCheckedChange={(checked) => createForm.setValue("isActive", checked)}
-              data-testid="switch-create-active"
-            />
-            <Label htmlFor="isActive">Active</Label>
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsCreateDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={createAliasMutation.isPending}
-              data-testid="button-submit-create"
-            >
-              {createAliasMutation.isPending ? "Creating..." : "Create Alias"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-
       {/* Edit Alias Dialog */}
       {editingAlias && (
         <Dialog open={!!editingAlias} onOpenChange={() => setEditingAlias(null)}>
@@ -663,93 +698,40 @@ export default function CalendarAliases() {
           </DialogContent>
         </Dialog>
       )}
-
-      {/* Test Pattern Dialog */}
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Test Pattern</DialogTitle>
-          <DialogDescription>
-            Test how your pattern will match against event titles
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={testForm.handleSubmit(onTestSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="testPattern">Pattern</Label>
-              <Input
-                id="testPattern"
-                placeholder="Enter pattern to test"
-                {...testForm.register("pattern")}
-                data-testid="input-test-pattern"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="testMatchType">Match Type</Label>
-              <Select
-                value={testForm.watch("matchType")}
-                onValueChange={(value) => testForm.setValue("matchType", value as any)}
-              >
-                <SelectTrigger data-testid="select-test-match-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="exact">Exact Match</SelectItem>
-                  <SelectItem value="contains">Contains</SelectItem>
-                  <SelectItem value="starts_with">Starts With</SelectItem>
-                  <SelectItem value="ends_with">Ends With</SelectItem>
-                  <SelectItem value="regex">Regular Expression</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="testText">Test Text</Label>
-            <Input
-              id="testText"
-              placeholder="Enter event title to test against"
-              {...testForm.register("testText")}
-              data-testid="input-test-text"
-            />
-          </div>
-
-          {testResult && (
-            <div className={`p-4 rounded-lg border ${testResult.matches ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-              <div className="flex items-center gap-2 mb-2">
-                {testResult.matches ? (
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                ) : (
-                  <XCircle className="h-5 w-5 text-red-600" />
-                )}
-                <span className={`font-medium ${testResult.matches ? 'text-green-800' : 'text-red-800'}`}>
-                  {testResult.matches ? 'Match Found!' : 'No Match'}
-                </span>
-              </div>
-              <p className={`text-sm ${testResult.matches ? 'text-green-700' : 'text-red-700'}`} data-testid="text-test-result">
-                {testResult.explanation}
-              </p>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsTestDialogOpen(false)}
-            >
-              Close
-            </Button>
-            <Button
-              type="submit"
-              disabled={testPatternMutation.isPending}
-              data-testid="button-run-test"
-            >
-              {testPatternMutation.isPending ? "Testing..." : "Run Test"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
     </div>
   );
+}
+
+function getMatchTypeLabel(matchType: string): string {
+  switch (matchType) {
+    case 'exact':
+      return 'Exact Match';
+    case 'contains':
+      return 'Contains';
+    case 'starts_with':
+      return 'Starts With';
+    case 'ends_with':
+      return 'Ends With';
+    case 'regex':
+      return 'Regular Expression';
+    default:
+      return matchType;
+  }
+}
+
+function getMatchTypeDescription(matchType: string): string {
+  switch (matchType) {
+    case 'exact':
+      return 'Event title must match exactly';
+    case 'contains':
+      return 'Event title must contain this pattern';
+    case 'starts_with':
+      return 'Event title must start with this pattern';
+    case 'ends_with':
+      return 'Event title must end with this pattern';
+    case 'regex':
+      return 'Event title must match this regular expression';
+    default:
+      return '';
+  }
 }
