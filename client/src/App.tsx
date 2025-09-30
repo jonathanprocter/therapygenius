@@ -24,6 +24,7 @@ import AICaseInsights from "@/pages/ai/case-insights";
 import AIDocumentAnalysis from "@/pages/ai/document-analysis";
 import CalendarReviews from "@/pages/calendar-reviews";
 import CalendarAliases from "@/pages/calendar-aliases";
+import CalendarView from "@/pages/calendar-view";
 
 function AppHeader({ onMenuToggle, isMobileMenuOpen }: { onMenuToggle?: () => void; isMobileMenuOpen?: boolean }) {
   const isMobile = useIsMobile();
@@ -243,6 +244,7 @@ function MainApp() {
             <Route path="/sessions" component={Sessions} />
             <Route path="/documents" component={Documents} />
             <Route path="/clients" component={Clients} />
+            <Route path="/calendar" component={CalendarView} />
             <Route path="/calendar/settings" component={CalendarSettings} />
             <Route path="/calendar/sync-dashboard" component={CalendarSyncDashboard} />
             <Route path="/calendar/reviews" component={CalendarReviews} />

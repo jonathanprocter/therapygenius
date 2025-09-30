@@ -1010,6 +1010,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Full calendar view endpoint - fetches ALL events (including non-therapy events)
+  app.get("/api/calendar/events", async (req: Request, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      
+      if (!startDate || typeof startDate !== "string") {
+        return res.status(400).json({ message: "startDate parameter is required (format: YYYY-MM-DD)" });
+      }
+      
+      if (!endDate || typeof endDate !== "string") {
+        return res.status(400).json({ message: "endDate parameter is required (format: YYYY-MM-DD)" });
+      }
+
+      // Validate date format
+      const startDateObj = new Date(startDate);
+      const endDateObj = new Date(endDate);
+      
+      if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
+        return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD" });
+      }
+
+      const calendarModule = await import("./calendar-sync");
+      const result = await calendarModule.calendarSync.fetchAllCalendarEvents(
+        THERAPIST_ID,
+        startDate,
+        endDate
+      );
+      
+      if (result.error) {
+        return res.status(500).json({ 
+          message: result.error,
+          events: result.events
+        });
+      }
+      
+      res.json({
+        events: result.events,
+        totalEvents: result.events.length,
+        therapySessions: result.events.filter(e => e.isTherapySession).length,
+        otherEvents: result.events.filter(e => !e.isTherapySession).length,
+        dateRange: {
+          start: startDate,
+          end: endDate
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching calendar events:", error);
+      res.status(500).json({ 
+        message: "Failed to fetch calendar events",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Calendar Review routes - Manual review system for rejected calendar events
   app.get("/api/calendar/pending-reviews", async (req: Request, res) => {
     try {

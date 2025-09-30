@@ -2327,6 +2327,150 @@ If no confident match found, respond with: {"match": false}
 
     return Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60));
   }
+
+  /**
+   * Fetch ALL calendar events for a date range (for full calendar view)
+   * This method does NOT filter events and returns everything including meetings, personal events, etc.
+   */
+  async fetchAllCalendarEvents(
+    therapistId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<{
+    events: Array<{
+      id: string;
+      title: string;
+      start: Date;
+      end: Date;
+      description?: string;
+      location?: string;
+      attendees?: string[];
+      isTherapySession: boolean;
+      clientName?: string;
+    }>;
+    error?: string;
+  }> {
+    try {
+      // Load authentication tokens
+      const isAuthenticated = await this.loadTokens(therapistId);
+      if (!isAuthenticated) {
+        return {
+          events: [],
+          error: 'Not authenticated with Google Calendar'
+        };
+      }
+
+      console.log(`[Calendar View] Fetching all events from ${startDate} to ${endDate}`);
+
+      // Fetch all events from both calendars without filtering
+      const calendarIds = [
+        'primary', 
+        '6ac7ac649a345a77fa617a926a67b4e1028f6a8ade0bdf1e7cca8f2b62310423@group.calendar.google.com'
+      ];
+      
+      const allEvents: CalendarEvent[] = [];
+
+      for (const calendarId of calendarIds) {
+        try {
+          // Add 1 day to endDate to make it inclusive (timeMax is exclusive in Google Calendar API)
+          const endDateTime = new Date(endDate);
+          endDateTime.setDate(endDateTime.getDate() + 1);
+          
+          const response = await this.calendar.events.list({
+            calendarId,
+            timeMin: new Date(startDate).toISOString(),
+            timeMax: endDateTime.toISOString(),
+            maxResults: 2500,
+            singleEvents: true,
+            orderBy: 'startTime',
+          });
+
+          const events = response.data.items || [];
+          
+          // Filter only valid events (not cancelled)
+          const validEvents = events.filter((event: any) => 
+            event.id && 
+            event.start && 
+            (event.start.dateTime || event.start.date) &&
+            event.status !== 'cancelled'
+          );
+          
+          allEvents.push(...validEvents);
+          console.log(`[Calendar View] Fetched ${validEvents.length} events from ${calendarId}`);
+        } catch (calendarError) {
+          console.error(`[Calendar View] Error fetching from calendar ${calendarId}:`, calendarError);
+        }
+      }
+
+      // Get all sessions for this therapist to identify therapy sessions
+      const sessions = await storage.getSessionsByTherapist(therapistId, 10000);
+      const sessionsByEventId = new Map(
+        sessions
+          .filter(s => s.externalEventId)
+          .map(s => [s.externalEventId, s])
+      );
+
+      // Get all clients for name lookup
+      const clients = await storage.getClientsByTherapist(therapistId);
+      const clientsById = new Map(clients.map(c => [c.id, c]));
+
+      // Transform events to the required format
+      const transformedEvents = allEvents.map(event => {
+        const eventId = event.id;
+        const session = sessionsByEventId.get(eventId);
+        const isTherapySession = !!session;
+        
+        let clientName: string | undefined;
+        if (session && session.clientId) {
+          const client = clientsById.get(session.clientId);
+          if (client) {
+            clientName = `${client.firstName} ${client.lastName}`;
+          }
+        }
+
+        // Parse start and end times
+        const start = event.start?.dateTime 
+          ? new Date(event.start.dateTime)
+          : event.start?.date
+          ? new Date(event.start.date)
+          : new Date();
+
+        const end = event.end?.dateTime 
+          ? new Date(event.end.dateTime)
+          : event.end?.date
+          ? new Date(event.end.date)
+          : new Date();
+
+        return {
+          id: eventId,
+          title: event.summary || 'Untitled Event',
+          start,
+          end,
+          description: event.description || undefined,
+          location: event.location || undefined,
+          attendees: event.attendees?.map(a => a.email || a.displayName || '').filter(Boolean) || undefined,
+          isTherapySession,
+          clientName
+        };
+      });
+
+      // Sort by start time
+      transformedEvents.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+      console.log(`[Calendar View] Returning ${transformedEvents.length} total events (${transformedEvents.filter(e => e.isTherapySession).length} therapy sessions)`);
+
+      return {
+        events: transformedEvents
+      };
+
+    } catch (error) {
+      console.error('[Calendar View] Error fetching calendar events:', error);
+      return {
+        events: [],
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
 }
 
 export const calendarSync = new CalendarSyncService();

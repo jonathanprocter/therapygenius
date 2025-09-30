@@ -153,12 +153,20 @@ export default function Dashboard() {
               {formatDateEastern(new Date())} (EST/EDT)
             </Badge>
           </div>
-          <Link href="/sessions">
-            <Button variant="outline" size="sm" data-testid="view-all-sessions">
-              <i className="fas fa-calendar w-4 h-4 mr-2"></i>
-              View All Sessions
-            </Button>
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/calendar">
+              <Button variant="default" size="sm" data-testid="view-full-calendar">
+                <i className="fas fa-calendar-alt w-4 h-4 mr-2"></i>
+                Full Calendar
+              </Button>
+            </Link>
+            <Link href="/sessions">
+              <Button variant="outline" size="sm" data-testid="view-all-sessions">
+                <i className="fas fa-calendar w-4 h-4 mr-2"></i>
+                View All Sessions
+              </Button>
+            </Link>
+          </div>
         </div>
         
         {/* Today's Schedule Card */}
