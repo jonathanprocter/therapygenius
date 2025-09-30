@@ -655,16 +655,16 @@ export default function Clients() {
     if (filterText.startsWith("Search:")) {
       setSearchTerm("");
     } else if (filterText.startsWith("Insurance:")) {
-      setInsuranceFilter("");
+      setInsuranceFilter("all");
     } else if (filterText.startsWith("Status:")) {
-      setStatusFilter("");
+      setStatusFilter("all");
     }
   };
   
   const clearAllFilters = () => {
     setSearchTerm("");
-    setInsuranceFilter("");
-    setStatusFilter("");
+    setInsuranceFilter("all");
+    setStatusFilter("all");
   };
 
   if (isLoading) {
