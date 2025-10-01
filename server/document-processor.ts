@@ -675,13 +675,9 @@ const triggerAssessmentGeneration = async (
     
     // Extract assessments from the document (non-blocking)
     const extractionResult = await assessmentExtractor.extractAssessmentsFromDocument(
-      document.id,
+      document,
       context.therapistId,
-      {
-        clientId: context.clientId,
-        includeAIAnalysis: true,
-        confidenceThreshold: 0.7
-      }
+      context.clientId
     );
 
     if (extractionResult.success && extractionResult.assessments && extractionResult.assessments.length > 0) {
@@ -748,8 +744,10 @@ const detectAssessmentContent = (document: Document, analysisResults: any): bool
   ];
 
   // Check filename for assessment indicators
+  // Sanitize both filename and indicator to handle hyphens, underscores, etc.
+  const fileNameSanitized = fileName.replace(/[^a-z0-9]/g, '');
   const fileNameHasAssessment = assessmentIndicators.some(indicator => 
-    fileName.includes(indicator.replace(/[^a-z0-9]/g, ''))
+    fileNameSanitized.includes(indicator.replace(/[^a-z0-9]/g, ''))
   );
 
   // Check content for assessment indicators
@@ -757,13 +755,16 @@ const detectAssessmentContent = (document: Document, analysisResults: any): bool
     content.includes(indicator)
   );
 
-  // Check for numerical scoring patterns (e.g., "Score: 15/27", "Total: 8")
+  // Check for assessment-specific numerical scoring patterns
+  // Avoid matching dates (10/15/2024), times (3:30 PM), or appointment numbers
   const scoringPatterns = [
-    /score[:\s]*\d+/i,
-    /total[:\s]*\d+/i,
-    /\d+\s*\/\s*\d+/,  // "15/27" format
-    /\d+\s*out of\s*\d+/i,
-    /severity[:\s]*\w+/i
+    /\bscore[:\s]+\d+/i,           // "score: 15" or "score 15"
+    /\btotal[:\s]+\d+/i,           // "total: 8" or "total 8"  
+    /\d+\s*\/\s*\d+\s*(?:points|score)/i,  // "15/27 points" or "15/27 score"
+    /\d+\s*out\s*of\s*\d+/i,       // "15 out of 27"
+    /severity[:\s]+\w+/i,          // "severity: moderate"
+    /\bphq-?\d+[:\s]+\d+/i,        // "PHQ-9: 15" or "PHQ9: 15"
+    /\bgad-?\d+[:\s]+\d+/i,        // "GAD-7: 8" or "GAD7: 8"
   ];
   
   const hasNumericalScoring = scoringPatterns.some(pattern => pattern.test(content));
@@ -782,8 +783,9 @@ const detectAssessmentContent = (document: Document, analysisResults: any): bool
   );
 
   // Document likely contains assessment content if:
-  // 1. Filename suggests it's an assessment, OR
-  // 2. Content has assessment indicators AND (numerical scoring OR analysis confirms assessment)
+  // 1. Filename clearly indicates it's an assessment, OR
+  // 2. Content has assessment indicators AND (numerical scoring OR AI confirms it)
+  // This catches both scored assessments and narrative assessments identified by AI
   const likelyHasAssessment = fileNameHasAssessment || 
     (contentHasAssessment && (hasNumericalScoring || analysisHasAssessment));
 
