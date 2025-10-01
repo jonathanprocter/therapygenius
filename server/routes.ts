@@ -398,6 +398,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Manually link a document to a client
+  app.post("/api/documents/:id/link-client", async (req: Request, res) => {
+    try {
+      const { clientId } = req.body;
+      
+      if (!clientId) {
+        return res.status(400).json({ message: "Client ID is required" });
+      }
+
+      const linkedDocument = await storage.linkDocumentToClient(
+        req.params.id,
+        clientId,
+        THERAPIST_ID
+      );
+
+      if (!linkedDocument) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      res.json({ 
+        message: "Document linked to client successfully", 
+        document: linkedDocument 
+      });
+    } catch (error) {
+      console.error("Error linking document to client:", error);
+      res.status(500).json({ message: "Failed to link document to client" });
+    }
+  });
+
   // Get documents by session
   app.get("/api/sessions/:sessionId/documents", async (req: Request, res) => {
     try {

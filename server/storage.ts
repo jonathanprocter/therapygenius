@@ -60,6 +60,7 @@ export interface IStorage {
   updateDocument(id: string, document: Partial<Document>, therapistId: string): Promise<Document | undefined>;
   deleteDocument(id: string, therapistId: string): Promise<boolean>;
   searchDocuments(query: string, therapistId: string): Promise<Document[]>;
+  linkDocumentToClient(documentId: string, clientId: string, therapistId: string): Promise<Document | undefined>;
 
   // Session operations
   getSessionById(id: string, therapistId: string): Promise<Session | undefined>;
@@ -412,6 +413,15 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(desc(documents.uploadDate));
+  }
+
+  async linkDocumentToClient(documentId: string, clientId: string, therapistId: string): Promise<Document | undefined> {
+    const [updatedDocument] = await db
+      .update(documents)
+      .set({ clientId, updatedAt: new Date() })
+      .where(and(eq(documents.id, documentId), eq(documents.therapistId, therapistId)))
+      .returning();
+    return updatedDocument;
   }
 
   async getSessionsByClient(clientId: string, therapistId: string): Promise<Session[]> {

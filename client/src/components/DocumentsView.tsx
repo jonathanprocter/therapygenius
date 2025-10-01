@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DocumentUpload } from "./DocumentUpload";
 import { DocumentAutoLinking } from "./DocumentAutoLinking";
+import { ManualDocumentLinking } from "./ManualDocumentLinking";
 import { useDocuments, useSearchDocuments, useDeleteDocument } from "@/hooks/useDocuments";
 import { useGenerateDocumentAssessments } from "@/hooks/useAITagging";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ export function DocumentsView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [linkingDocument, setLinkingDocument] = useState<Document | null>(null);
 
   const { data: documents, isLoading } = useDocuments();
   const searchMutation = useSearchDocuments();
@@ -183,6 +185,28 @@ export function DocumentsView() {
             Extract Assessments
           </>
         )}
+      </Button>
+    );
+  };
+
+  const LinkToClientButton = ({ document }: { document: Document }) => {
+    if (document.sessionId || document.clientId) {
+      return null;
+    }
+
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation();
+          setLinkingDocument(document);
+        }}
+        className="text-xs px-2 py-1 h-auto"
+        data-testid={`link-to-client-${document.id}`}
+      >
+        <Link2 className="w-3 h-3 mr-1" />
+        Link to Client
       </Button>
     );
   };
@@ -450,7 +474,10 @@ export function DocumentsView() {
                       {/* Document Actions */}
                       <div className="flex items-center justify-between">
                         <DeleteDocumentButton document={document} />
-                        <DocumentAssessmentButton document={document} />
+                        <div className="flex items-center gap-2">
+                          <LinkToClientButton document={document} />
+                          <DocumentAssessmentButton document={document} />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -483,6 +510,7 @@ export function DocumentsView() {
                       {document.isProcessed && (
                         <i className="fas fa-magic text-purple-500 text-xs" title="AI Processed"></i>
                       )}
+                      <LinkToClientButton document={document} />
                       <DocumentAssessmentButton document={document} />
                       <DeleteDocumentButton document={document} />
                     </div>
@@ -498,6 +526,14 @@ export function DocumentsView() {
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
       />
+
+      {linkingDocument && (
+        <ManualDocumentLinking
+          document={linkingDocument}
+          isOpen={!!linkingDocument}
+          onClose={() => setLinkingDocument(null)}
+        />
+      )}
     </div>
   );
 }
