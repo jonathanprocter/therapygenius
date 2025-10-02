@@ -348,6 +348,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Parse progress notes and update session notes
+  app.post("/api/documents/:id/parse-appointments", async (req: Request, res) => {
+    try {
+      const { clientId } = req.body;
+      
+      if (!clientId) {
+        return res.status(400).json({ message: "Client ID is required" });
+      }
+
+      const { updateSessionsWithParsedAppointments } = await import('./appointment-parser');
+      const result = await updateSessionsWithParsedAppointments(clientId, req.params.id);
+
+      if (!result.success) {
+        return res.status(500).json({ 
+          message: "Failed to parse appointments",
+          errors: result.errors 
+        });
+      }
+
+      res.json({ 
+        message: "Successfully parsed and updated appointments",
+        updated: result.updated,
+        errors: result.errors
+      });
+    } catch (error) {
+      console.error("Error parsing appointments:", error);
+      res.status(500).json({ message: "Failed to parse appointments" });
+    }
+  });
+
   // Enhanced Document-Session Linking Endpoints
 
   // Get potential session matches for a document
