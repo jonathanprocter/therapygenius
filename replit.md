@@ -88,9 +88,10 @@ The system is designed to be highly scalable with serverless database connection
   - Updated calendar sync to use `toEasternDate()` with source timezone awareness
   - Modified appointment parser to use `getCurrentEasternTime()` for all date operations
   - Added runtime timezone assertion in `server/index.ts` to verify America/New_York configuration
+  - Fixed frontend `formatTimeEastern()` in `client/src/lib/utils.ts` to correctly display Eastern Time by extracting UTC time components (which represent Eastern Time values) and formatting with proper EDT/EST labels
 - **Client Data Corrections**: 
   - Deleted Chris Wright client and reassigned all 51 sessions to Chris Balabanick
-  - Verified today's appointments display correct Eastern Time: Meera Zucker at 1:00 PM, Nick D'Abreu at 2:30 PM, Chris Balabanick at 5:00 PM
+  - Verified today's appointments display correct Eastern Time: Meera Zucker at 1:00 PM EDT, Nick D'Abreu at 2:30 PM EDT, Chris Balabanick at 5:00 PM EDT
 - **Calendar Sync Enhancement**: Configured to run only during business hours (6 AM - 10 PM Eastern) with smart sync enabled and 2-hour interval
 
 ## September 29, 2025
