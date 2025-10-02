@@ -81,5 +81,17 @@ The system is designed to be highly scalable with serverless database connection
 
 # Recent Changes
 
+## October 2, 2025
+- **Critical Timezone Fix - DST-Aware Eastern Time Conversion**: Implemented comprehensive timezone handling using Luxon library to ensure all appointment times are stored and displayed in Eastern Time (America/New_York) with proper Daylight Saving Time support. Fixed 1,459 historical appointments using PostgreSQL's DST-aware timezone conversion: `(session_date AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York'`, which automatically applies correct UTC-4 (EDT) and UTC-5 (EST) offsets.
+- **Timezone Infrastructure Added**:
+  - Created `server/lib/eastern-time.ts` with Luxon-based utilities for Eastern Time conversion
+  - Updated calendar sync to use `toEasternDate()` with source timezone awareness
+  - Modified appointment parser to use `getCurrentEasternTime()` for all date operations
+  - Added runtime timezone assertion in `server/index.ts` to verify America/New_York configuration
+- **Client Data Corrections**: 
+  - Deleted Chris Wright client and reassigned all 51 sessions to Chris Balabanick
+  - Verified today's appointments display correct Eastern Time: Meera Zucker at 1:00 PM, Nick D'Abreu at 2:30 PM, Chris Balabanick at 5:00 PM
+- **Calendar Sync Enhancement**: Configured to run only during business hours (6 AM - 10 PM Eastern) with smart sync enabled and 2-hour interval
+
 ## September 29, 2025
 - **Richard Hayes Comprehensive Session Upload**: Successfully uploaded complete therapeutic record with 10 detailed therapy sessions from 2024 (April-August), including comprehensive progress notes and structured AI tags for longitudinal case conceptualization. All sessions standardized with consistent schema and proper JSON formatting for advanced analytics and clinical insights tracking.
