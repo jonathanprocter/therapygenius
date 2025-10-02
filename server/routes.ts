@@ -132,6 +132,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/documents/:id", async (req: Request, res) => {
+    try {
+      const document = await storage.getDocumentById(req.params.id, THERAPIST_ID);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      res.json(document);
+    } catch (error) {
+      console.error("Error fetching document:", error);
+      res.status(500).json({ message: "Failed to fetch document" });
+    }
+  });
+
   app.post("/api/documents/upload", upload.array("files", 10), async (req: Request, res) => {
     try {
       const files = req.files as Express.Multer.File[];

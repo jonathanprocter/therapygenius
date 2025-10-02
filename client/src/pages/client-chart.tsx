@@ -39,6 +39,8 @@ export default function ClientChart() {
   const { id } = useParams();
   const clientId = id as string;
   const [selectedSession, setSelectedSession] = useState<any>(null);
+  const [documentContent, setDocumentContent] = useState<string | null>(null);
+  const [loadingDocument, setLoadingDocument] = useState(false);
 
   const { data: client, isLoading: clientLoading } = useClient(clientId);
   const { data: sessions, isLoading: sessionsLoading } = useClientSessions(clientId);
@@ -54,6 +56,38 @@ export default function ClientChart() {
   const generateReport = useGenerateClientReport(clientId);
   const { data: reports, isLoading: reportsLoading } = useClientReports(clientId);
   const { data: clientAITags, isLoading: aiTagsLoading } = useClientAITags(clientId);
+
+  const loadDocumentContent = async (session: any) => {
+    if (!session?.notes) return;
+    
+    // Extract document filename from notes
+    const match = session.notes.match(/Progress notes documented in (.+?)$/i);
+    if (!match) return;
+    
+    const filename = match[1].trim();
+    
+    setLoadingDocument(true);
+    try {
+      // Find the document by filename
+      const doc = documents?.find((d: any) => d.fileName === filename);
+      if (!doc) {
+        console.error("Document not found:", filename);
+        return;
+      }
+      
+      // Fetch the full document with content
+      const response = await fetch(`/api/documents/${doc.id}`);
+      if (!response.ok) throw new Error("Failed to fetch document");
+      
+      const fullDocument = await response.json();
+      setDocumentContent(fullDocument.content || "No content available");
+    } catch (error) {
+      console.error("Error loading document:", error);
+      setDocumentContent("Error loading document content");
+    } finally {
+      setLoadingDocument(false);
+    }
+  };
 
   if (clientLoading) {
     return (
@@ -980,7 +1014,10 @@ export default function ClientChart() {
       </div>
 
       {/* Session Detail Dialog */}
-      <Dialog open={selectedSession !== null} onOpenChange={() => setSelectedSession(null)}>
+      <Dialog open={selectedSession !== null} onOpenChange={() => {
+        setSelectedSession(null);
+        setDocumentContent(null);
+      }}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto" data-testid="session-detail-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center space-x-3">
@@ -1040,28 +1077,72 @@ export default function ClientChart() {
                   <CardContent>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{selectedSession.notes}</p>
                     
-                    {/* If notes mention a document, show link to documents */}
+                    {/* If notes mention a document, show load/view button */}
                     {selectedSession.notes.includes('Progress notes documented in') && (
-                      <div className="mt-4 pt-4 border-t">
+                      <div className="mt-4 pt-4 border-t space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                             <FileText className="w-4 h-4" />
-                            <span>Full progress notes available in Documents tab</span>
+                            <span>Full progress notes available</span>
                           </div>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => {
-                              setSelectedSession(null);
-                              const docsTab = document.querySelector('[data-value="documents"]') as HTMLElement;
-                              docsTab?.click();
-                            }}
-                            data-testid="view-progress-notes"
-                          >
-                            <FileText className="w-4 h-4 mr-2" />
-                            View Full Document
-                          </Button>
+                          <div className="flex space-x-2">
+                            {!documentContent && (
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => loadDocumentContent(selectedSession)}
+                                disabled={loadingDocument}
+                                data-testid="load-progress-notes"
+                              >
+                                {loadingDocument ? (
+                                  <>
+                                    <Clock className="w-4 h-4 mr-2 animate-spin" />
+                                    Loading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <FileText className="w-4 h-4 mr-2" />
+                                    Load Document
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => {
+                                setSelectedSession(null);
+                                setDocumentContent(null);
+                                const docsTab = document.querySelector('[data-value="documents"]') as HTMLElement;
+                                docsTab?.click();
+                              }}
+                              data-testid="view-progress-notes"
+                            >
+                              <FileText className="w-4 h-4 mr-2" />
+                              Go to Documents
+                            </Button>
+                          </div>
                         </div>
+                        
+                        {/* Display document content when loaded */}
+                        {documentContent && (
+                          <div className="mt-3 p-4 bg-muted/50 rounded-lg border max-h-96 overflow-y-auto">
+                            <div className="flex items-center justify-between mb-3">
+                              <h5 className="font-medium text-sm">Full Document Content</h5>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => setDocumentContent(null)}
+                                data-testid="hide-document-content"
+                              >
+                                Hide
+                              </Button>
+                            </div>
+                            <div className="text-sm leading-relaxed whitespace-pre-wrap font-mono">
+                              {documentContent}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </CardContent>
@@ -1085,7 +1166,10 @@ export default function ClientChart() {
 
               {/* Action Buttons */}
               <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={() => setSelectedSession(null)} data-testid="close-session-dialog">
+                <Button variant="outline" onClick={() => {
+                  setSelectedSession(null);
+                  setDocumentContent(null);
+                }} data-testid="close-session-dialog">
                   Close
                 </Button>
                 <Button variant="default" data-testid="edit-session-from-dialog">
