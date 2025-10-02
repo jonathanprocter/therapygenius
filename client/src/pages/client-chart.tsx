@@ -6,11 +6,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ClientProfile } from "@/components/ClientProfile";
 import { CaseConceptualization } from "@/components/CaseConceptualization";
 import { ClientAITags } from "@/components/ClientAITags";
 import { CalendarSync } from "@/components/CalendarSync";
-import { Calendar, Brain, FileText, TrendingUp, TrendingDown, Shield, Link2, User, Clock, AlertTriangle, Target, Activity, Sparkles } from "lucide-react";
+import { Calendar, Brain, FileText, TrendingUp, TrendingDown, Shield, Link2, User, Clock, AlertTriangle, Target, Activity, Sparkles, Eye } from "lucide-react";
 import { 
   useClient, 
   useClientSessions, 
@@ -31,6 +38,7 @@ import {
 export default function ClientChart() {
   const { id } = useParams();
   const clientId = id as string;
+  const [selectedSession, setSelectedSession] = useState<any>(null);
 
   const { data: client, isLoading: clientLoading } = useClient(clientId);
   const { data: sessions, isLoading: sessionsLoading } = useClientSessions(clientId);
@@ -474,7 +482,12 @@ export default function ClientChart() {
                   ) : (
                     <div className="space-y-4">
                       {sessions?.map((session: any) => (
-                        <Card key={session.id} data-testid={`session-detail-${session.id}`}>
+                        <Card 
+                          key={session.id} 
+                          data-testid={`session-detail-${session.id}`}
+                          className="cursor-pointer hover:shadow-md transition-shadow"
+                          onClick={() => setSelectedSession(session)}
+                        >
                           <CardContent className="p-4">
                             <div className="flex items-start justify-between">
                               <div className="flex-1">
@@ -498,7 +511,7 @@ export default function ClientChart() {
                                   )}
                                 </div>
                                 {session.notes && (
-                                  <p className="text-sm text-muted-foreground mb-2">
+                                  <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
                                     {session.notes}
                                   </p>
                                 )}
@@ -509,8 +522,16 @@ export default function ClientChart() {
                                   </div>
                                 )}
                               </div>
-                              <Button variant="ghost" size="sm" data-testid={`edit-session-${session.id}`}>
-                                <i className="fas fa-edit"></i>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                data-testid={`view-session-${session.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedSession(session);
+                                }}
+                              >
+                                <Eye className="w-4 h-4" />
                               </Button>
                             </div>
                           </CardContent>
@@ -957,6 +978,125 @@ export default function ClientChart() {
           </Tabs>
         </div>
       </div>
+
+      {/* Session Detail Dialog */}
+      <Dialog open={selectedSession !== null} onOpenChange={() => setSelectedSession(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto" data-testid="session-detail-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center space-x-3">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              <span>Session Details</span>
+              <Badge variant="outline">
+                {selectedSession && formatDate(selectedSession.sessionDate)}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>
+              {selectedSession?.sessionType || "Individual Therapy"} • {selectedSession?.duration || 60} minutes
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedSession && (
+            <div className="space-y-6">
+              {/* Session Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Session Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Date & Time:</span>
+                      <p className="font-medium">{formatDate(selectedSession.sessionDate)}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Duration:</span>
+                      <p className="font-medium">{selectedSession.duration || 60} minutes</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Session Type:</span>
+                      <p className="font-medium">{selectedSession.sessionType || "Individual Therapy"}</p>
+                    </div>
+                    {selectedSession.externalEventId && (
+                      <div>
+                        <Badge className="bg-green-100 text-green-800 border-green-200">
+                          <Calendar className="w-3 h-3 mr-1" />
+                          Synced from Calendar
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Session Notes */}
+              {selectedSession.notes && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center space-x-2">
+                      <FileText className="w-4 h-4" />
+                      <span>Session Notes</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{selectedSession.notes}</p>
+                    
+                    {/* If notes mention a document, show link to documents */}
+                    {selectedSession.notes.includes('Progress notes documented in') && (
+                      <div className="mt-4 pt-4 border-t">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                            <FileText className="w-4 h-4" />
+                            <span>Full progress notes available in Documents tab</span>
+                          </div>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => {
+                              setSelectedSession(null);
+                              const docsTab = document.querySelector('[data-value="documents"]') as HTMLElement;
+                              docsTab?.click();
+                            }}
+                            data-testid="view-progress-notes"
+                          >
+                            <FileText className="w-4 h-4 mr-2" />
+                            View Full Document
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Homework */}
+              {selectedSession.homework && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center space-x-2">
+                      <Target className="w-4 h-4 text-blue-600" />
+                      <span>Homework Assignment</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm leading-relaxed">{selectedSession.homework}</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-2">
+                <Button variant="outline" onClick={() => setSelectedSession(null)} data-testid="close-session-dialog">
+                  Close
+                </Button>
+                <Button variant="default" data-testid="edit-session-from-dialog">
+                  <i className="fas fa-edit mr-2"></i>
+                  Edit Session
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
