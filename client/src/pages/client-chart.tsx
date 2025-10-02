@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "wouter";
+import { useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,6 +35,8 @@ import {
   useClientReports,
   useClientAITags
 } from "@/hooks/useAITagging";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 
 export default function ClientChart() {
   const { id } = useParams();
@@ -41,6 +44,7 @@ export default function ClientChart() {
   const [selectedSession, setSelectedSession] = useState<any>(null);
   const [documentContent, setDocumentContent] = useState<string | null>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
+  const { toast } = useToast();
 
   const { data: client, isLoading: clientLoading } = useClient(clientId);
   const { data: sessions, isLoading: sessionsLoading } = useClientSessions(clientId);
@@ -56,6 +60,32 @@ export default function ClientChart() {
   const generateReport = useGenerateClientReport(clientId);
   const { data: reports, isLoading: reportsLoading } = useClientReports(clientId);
   const { data: clientAITags, isLoading: aiTagsLoading } = useClientAITags(clientId);
+
+  // Parse appointments mutation
+  const parseAppointments = useMutation({
+    mutationFn: async (documentId: string) => {
+      const response = await apiRequest("POST", `/api/documents/${documentId}/parse-appointments`, {
+        clientId,
+      });
+      return response;
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Appointments Parsed Successfully",
+        description: `Updated ${data.updated} session${data.updated !== 1 ? 's' : ''}${data.errors?.length ? `. ${data.errors.length} error${data.errors.length !== 1 ? 's' : ''} occurred.` : ''}`,
+        variant: data.errors?.length ? "default" : "default",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error Parsing Appointments",
+        description: error.message || "Failed to parse appointments from document",
+        variant: "destructive",
+      });
+    },
+  });
 
   const loadDocumentContent = async (session: any) => {
     if (!session?.notes) return;
@@ -216,10 +246,11 @@ export default function ClientChart() {
         {/* Main Content */}
         <div className="lg:col-span-3 space-y-6">
           <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-7">
               <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
               <TabsTrigger value="sessions" data-testid="tab-sessions">Sessions</TabsTrigger>
               <TabsTrigger value="assessments" data-testid="tab-assessments">Assessments</TabsTrigger>
+              <TabsTrigger value="documents" data-testid="tab-documents">Documents</TabsTrigger>
               <TabsTrigger value="medications" data-testid="tab-medications">Medications</TabsTrigger>
               <TabsTrigger value="treatment" data-testid="tab-treatment">Treatment</TabsTrigger>
               <TabsTrigger value="ai-insights" data-testid="tab-ai-insights">AI Insights</TabsTrigger>
@@ -798,6 +829,120 @@ export default function ClientChart() {
                       <span className="text-sm">Generate Report</span>
                     </Button>
                   </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="documents" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Client Documents</CardTitle>
+                    <Button data-testid="upload-document">
+                      <i className="fas fa-upload mr-2"></i>
+                      Upload Document
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {documentsLoading ? (
+                    <div className="space-y-4">
+                      {[...Array(3)].map((_, i) => (
+                        <Skeleton key={i} className="h-20" />
+                      ))}
+                    </div>
+                  ) : documents?.length === 0 ? (
+                    <div className="text-center py-12">
+                      <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-medium mb-2">No Documents</h3>
+                      <p className="text-muted-foreground mb-4">Upload documents for this client</p>
+                      <Button data-testid="first-document-upload">
+                        <i className="fas fa-upload mr-2"></i>
+                        Upload First Document
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {documents?.map((doc: any) => {
+                        const isProgressNotes = doc.fileName?.toLowerCase().includes('progress notes');
+                        return (
+                          <Card key={doc.id} data-testid={`document-${doc.id}`}>
+                            <CardContent className="p-4">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-3 mb-2">
+                                    <FileText className="w-5 h-5 text-blue-600" />
+                                    <h3 className="font-medium">{doc.fileName}</h3>
+                                    {doc.sessionId && (
+                                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                        <Link2 className="w-3 h-3 mr-1" />
+                                        Linked
+                                      </Badge>
+                                    )}
+                                    {doc.sourceEventId && (
+                                      <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                                        <Calendar className="w-3 h-3 mr-1" />
+                                        Calendar
+                                      </Badge>
+                                    )}
+                                    {isProgressNotes && (
+                                      <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                        Progress Notes
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground space-y-1">
+                                    <div className="flex items-center space-x-4">
+                                      {doc.uploadDate && (
+                                        <span>Uploaded: {formatDate(doc.uploadDate)}</span>
+                                      )}
+                                      {doc.fileSize && (
+                                        <span>Size: {(doc.fileSize / 1024).toFixed(1)} KB</span>
+                                      )}
+                                    </div>
+                                    {doc.extractedText && (
+                                      <p className="line-clamp-2 text-xs mt-2">
+                                        {doc.extractedText.substring(0, 150)}...
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center space-x-2 ml-4">
+                                  {isProgressNotes && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => parseAppointments.mutate(doc.id)}
+                                      disabled={parseAppointments.isPending}
+                                      data-testid={`parse-appointments-${doc.id}`}
+                                    >
+                                      {parseAppointments.isPending ? (
+                                        <>
+                                          <Clock className="w-4 h-4 mr-2 animate-spin" />
+                                          Parsing...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Calendar className="w-4 h-4 mr-2" />
+                                          Parse Appointments
+                                        </>
+                                      )}
+                                    </Button>
+                                  )}
+                                  <Button variant="ghost" size="sm" data-testid={`view-document-${doc.id}`}>
+                                    <Eye className="w-4 h-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="sm" data-testid={`delete-document-${doc.id}`}>
+                                    <i className="fas fa-trash text-xs"></i>
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
