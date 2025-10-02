@@ -1,6 +1,7 @@
 import { db } from './db';
 import { sessions, documents } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import { getCurrentEasternTime } from './lib/eastern-time';
 
 interface AppointmentSection {
   appointmentNumber: number;
@@ -96,7 +97,7 @@ export async function updateSessionsWithParsedAppointments(
             .update(sessions)
             .set({
               notes: matchedAppointment.content,
-              updatedAt: new Date()
+              updatedAt: getCurrentEasternTime()
             })
             .where(eq(sessions.id, session.id));
           

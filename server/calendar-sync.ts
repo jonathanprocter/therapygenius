@@ -4,6 +4,7 @@ import { storage } from './storage';
 import { aiRouter } from './ai';
 import { encryptionService, EncryptionAuditLogger } from './encryption';
 import { z } from 'zod';
+import { toEasternDate } from './lib/eastern-time';
 
 // Background sync scheduler for managing per-user sync schedules
 class CalendarSyncScheduler {
@@ -1844,7 +1845,7 @@ If no confident match found, respond with: {"match": false}
         throw new Error('Event missing start time');
       }
 
-      const sessionDate = new Date(startTime);
+      const sessionDate = toEasternDate(startTime, event.start?.timeZone);
       const duration = endTime ? 
         Math.round((new Date(endTime).getTime() - sessionDate.getTime()) / (1000 * 60)) : 
         50; // Default 50 minutes
