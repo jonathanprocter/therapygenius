@@ -473,16 +473,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTodaysSessions(therapistId: string): Promise<Array<Session & { clientName: string }>> {
-    // Get current date in Eastern timezone
-    const easternToday = new Date();
-    const easternOffset = -5; // EST is UTC-5, EDT is UTC-4 (we'll use -5 for simplicity)
-    easternToday.setHours(0, 0, 0, 0);
-    
-    // Create start and end of day in Eastern time
-    const startOfDay = new Date(easternToday);
-    const endOfDay = new Date(easternToday);
-    endOfDay.setHours(23, 59, 59, 999);
-
+    // Get today's date in Eastern timezone
+    // Use SQL to get current date in America/New_York timezone
     const result = await db
       .select({
         // Session fields
@@ -509,8 +501,10 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(sessions.therapistId, therapistId),
-          gte(sessions.sessionDate, startOfDay),
-          lte(sessions.sessionDate, endOfDay)
+          // Compare session date with current Eastern Time date
+          // CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York' gives us current ET time
+          // Then DATE() extracts just the date part
+          sql`DATE(${sessions.sessionDate}) = DATE(CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')`
         )
       )
       .orderBy(sessions.sessionDate);
