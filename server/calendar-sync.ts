@@ -2130,7 +2130,7 @@ If no confident match found, respond with: {"match": false}
       'flight', 'commute', 'shower', 'prep', 'walk dogs', 'spanish', 'free time',
       'tag/respond to e-mails', 'e-mail', 'phone calls', 'text messages',
       'academic writing', 'grading', 'participation', 'office hours',
-      'meeting with nora', 'focus time', 'deep work', 'edc ', 'gcu ',
+      'focus time', 'deep work', 'edc ', 'gcu ',
       'ccu ', 'liu ', 'birthday', 'vacation', 'trip', 'hotel', 'stay at'
     ];
     
