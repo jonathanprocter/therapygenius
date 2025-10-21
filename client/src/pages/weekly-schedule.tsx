@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { Link } from "wouter";
-import { formatTimeEastern } from "@/lib/utils";
+import { formatTimeEastern, getEasternHours, isSameDayEastern } from "@/lib/utils";
 import { startOfWeek, addDays, format, addWeeks, subWeeks, isSameDay } from "date-fns";
 
 type SessionWithClient = {
@@ -39,11 +39,10 @@ export default function WeeklySchedule() {
       if (!response.ok) throw new Error("Failed to fetch sessions");
       const allSessions = await response.json();
       
-      // Filter sessions for current week
-      const weekEnd = addDays(weekStart, 7);
+      // Filter sessions for current week using Eastern Time
       return allSessions.filter((session: SessionWithClient) => {
         const sessionDate = new Date(session.sessionDate);
-        return sessionDate >= weekStart && sessionDate < weekEnd;
+        return weekDays.some(day => isSameDayEastern(sessionDate, day));
       });
     },
   });
@@ -65,9 +64,9 @@ export default function WeeklySchedule() {
     
     return sessions.filter(session => {
       const sessionDate = new Date(session.sessionDate);
-      const sessionHour = sessionDate.getUTCHours(); // Using UTC hours since that's how we store Eastern Time
+      const sessionHour = getEasternHours(sessionDate); // Get hour in Eastern Time
       
-      return isSameDay(sessionDate, day) && sessionHour === hour;
+      return isSameDayEastern(sessionDate, day) && sessionHour === hour;
     });
   };
 
@@ -78,7 +77,7 @@ export default function WeeklySchedule() {
     return `${hour - 12} PM`;
   };
 
-  const isToday = (day: Date) => isSameDay(day, new Date());
+  const isToday = (day: Date) => isSameDayEastern(day, new Date());
 
   return (
     <div className="space-y-6" data-testid="weekly-schedule">

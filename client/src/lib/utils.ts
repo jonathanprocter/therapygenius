@@ -93,3 +93,38 @@ export function calculateAgeEastern(dateOfBirth: string | Date | null): number |
 export function getCurrentEasternTime(): Date {
   return new Date(new Date().toLocaleString('en-US', { timeZone: EASTERN_TIMEZONE }));
 }
+
+/**
+ * Get the hour (0-23) in Eastern Time for a given date
+ */
+export function getEasternHours(date: string | Date | null | undefined): number {
+  if (!date) return 0;
+  
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  
+  // Extract hour in Eastern timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: EASTERN_TIMEZONE,
+    hour: 'numeric',
+    hour12: false
+  });
+  
+  return parseInt(formatter.format(dateObj));
+}
+
+/**
+ * Check if two dates are the same day in Eastern Time
+ */
+export function isSameDayEastern(date1: Date | string, date2: Date | string): boolean {
+  const d1 = typeof date1 === 'string' ? new Date(date1) : date1;
+  const d2 = typeof date2 === 'string' ? new Date(date2) : date2;
+  
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: EASTERN_TIMEZONE,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric'
+  });
+  
+  return formatter.format(d1) === formatter.format(d2);
+}
