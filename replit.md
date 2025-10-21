@@ -81,6 +81,22 @@ The system is designed to be highly scalable with serverless database connection
 
 # Recent Changes
 
+## October 21, 2025
+- **Complete Timezone Display Fix**: Resolved all remaining timezone display inconsistencies across the application
+  - Fixed `formatTimeEastern()` in `client/src/lib/utils.ts` to properly convert UTC timestamps to Eastern Time using `toLocaleTimeString` with America/New_York timezone
+  - Added `getEasternHours()` and `isSameDayEastern()` helper functions for consistent timezone comparisons
+  - Updated Weekly Schedule to use Eastern Time for all date/time operations, fixing hour slot matching and week filtering
+  - Verified all views (Dashboard, Weekly Schedule, Calendar) display times correctly in EDT/EST format
+- **Client Matching Corrections**: Fixed three calendar sync mismatches caused by partial name matching algorithm
+  - Corrected Nancy Grossman session (was incorrectly assigned to David Grossman due to shared last name)
+  - Corrected Michael Cserenyi session (was incorrectly assigned to Michael Neira due to shared first name)
+  - Corrected Sarah Palladino session (was incorrectly assigned to Sarah Thomas due to shared first name)
+  - Deleted incorrectly created sessions for personal events "Coffee with Nora" and "Call with Blake"
+- **Personal Event Handling**: Personal meetings now appear correctly in calendar view without creating therapy session records
+  - Events like "Coffee with Nora" and "Call with Blake" display on calendar but don't match to clients
+  - Non-matched events are added to review queue for manual handling if needed
+- **Verification**: E2E testing confirmed all October 20th appointments display at correct Eastern times with proper client assignments across all views
+
 ## October 2, 2025
 - **Critical Timezone Fix - DST-Aware Eastern Time Conversion**: Implemented comprehensive timezone handling using Luxon library to ensure all appointment times are stored and displayed in Eastern Time (America/New_York) with proper Daylight Saving Time support. Fixed 1,459 historical appointments using PostgreSQL's DST-aware timezone conversion: `(session_date AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York'`, which automatically applies correct UTC-4 (EDT) and UTC-5 (EST) offsets.
 - **Timezone Infrastructure Added**:
