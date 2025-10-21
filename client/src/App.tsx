@@ -25,6 +25,7 @@ import AIDocumentAnalysis from "@/pages/ai/document-analysis";
 import CalendarReviews from "@/pages/calendar-reviews";
 import CalendarAliases from "@/pages/calendar-aliases";
 import CalendarView from "@/pages/calendar-view";
+import WeeklySchedule from "@/pages/weekly-schedule";
 
 function AppHeader({ onMenuToggle, isMobileMenuOpen }: { onMenuToggle?: () => void; isMobileMenuOpen?: boolean }) {
   const isMobile = useIsMobile();
@@ -249,7 +250,7 @@ function MainApp() {
             <Route path="/calendar/sync-dashboard" component={CalendarSyncDashboard} />
             <Route path="/calendar/reviews" component={CalendarReviews} />
             <Route path="/calendar/aliases" component={CalendarAliases} />
-            <Route path="/schedule" component={() => <div>Schedule page coming soon</div>} />
+            <Route path="/schedule" component={WeeklySchedule} />
             <Route path="/assessments" component={Assessments} />
             <Route path="/reports" component={Reports} />
             <Route path="/ai/document-analysis" component={AIDocumentAnalysis} />

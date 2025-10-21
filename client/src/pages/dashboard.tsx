@@ -83,23 +83,25 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Sessions This Week</p>
-                <p className="text-3xl font-bold" data-testid="week-sessions">{stats?.weekSessions || 0}</p>
+        <Link href="/schedule">
+          <Card className="cursor-pointer hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Sessions This Week</p>
+                  <p className="text-3xl font-bold" data-testid="week-sessions">{stats?.weekSessions || 0}</p>
+                </div>
+                <div className="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center">
+                  <i className="fas fa-calendar-check text-green-600 text-xl"></i>
+                </div>
               </div>
-              <div className="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center">
-                <i className="fas fa-calendar-check text-green-600 text-xl"></i>
+              <div className="flex items-center mt-4 text-sm">
+                <span className="text-green-600 font-medium">This week</span>
+                <span className="text-muted-foreground ml-2">• Click to view schedule</span>
               </div>
-            </div>
-            <div className="flex items-center mt-4 text-sm">
-              <span className="text-green-600 font-medium">This week</span>
-              <span className="text-muted-foreground ml-2">completed</span>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Link>
 
         <Card>
           <CardContent className="p-6">
