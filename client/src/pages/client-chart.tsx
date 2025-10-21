@@ -119,6 +119,14 @@ export default function ClientChart() {
     }
   };
 
+  const cleanSessionNotes = (notes: string) => {
+    // Replace long Google Calendar import text with "SimplePractice"
+    if (notes && notes.includes('Imported from Google Calendar')) {
+      return 'SimplePractice';
+    }
+    return notes;
+  };
+
   if (clientLoading) {
     return (
       <div className="space-y-6">
@@ -450,7 +458,7 @@ export default function ClientChart() {
                             </div>
                             {session.notes && (
                               <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                                {session.notes}
+                                {cleanSessionNotes(session.notes)}
                               </p>
                             )}
                             {session.duration && (
@@ -577,7 +585,7 @@ export default function ClientChart() {
                                 </div>
                                 {session.notes && (
                                   <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
-                                    {session.notes}
+                                    {cleanSessionNotes(session.notes)}
                                   </p>
                                 )}
                                 {session.homework && (
