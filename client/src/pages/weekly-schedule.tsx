@@ -134,22 +134,27 @@ export default function WeeklySchedule() {
                     <span className="text-sm font-medium text-muted-foreground">Time</span>
                   </div>
                   {weekDays.map((day) => (
-                    <div 
+                    <Link 
                       key={day.toString()} 
-                      className={`p-3 border-r border-border last:border-r-0 text-center ${
-                        isToday(day) ? 'bg-primary/10' : ''
-                      }`}
+                      href={`/calendar?date=${format(day, 'yyyy-MM-dd')}`}
                     >
-                      <div className="text-sm font-semibold">
-                        {format(day, "EEE")}
+                      <div 
+                        className={`p-3 border-r border-border last:border-r-0 text-center cursor-pointer hover:bg-primary/20 transition-colors ${
+                          isToday(day) ? 'bg-primary/10' : ''
+                        }`}
+                        data-testid={`day-header-${format(day, 'yyyy-MM-dd')}`}
+                      >
+                        <div className="text-sm font-semibold">
+                          {format(day, "EEE")}
+                        </div>
+                        <div className={`text-lg font-bold ${isToday(day) ? 'text-primary' : ''}`}>
+                          {format(day, "d")}
+                        </div>
+                        {isToday(day) && (
+                          <Badge variant="default" className="text-xs mt-1">Today</Badge>
+                        )}
                       </div>
-                      <div className={`text-lg font-bold ${isToday(day) ? 'text-primary' : ''}`}>
-                        {format(day, "d")}
-                      </div>
-                      {isToday(day) && (
-                        <Badge variant="default" className="text-xs mt-1">Today</Badge>
-                      )}
-                    </div>
+                    </Link>
                   ))}
                 </div>
 
