@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { format, addDays, subDays, startOfToday, parseISO } from "date-fns";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, MapPin, Users, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, MapPin, Users, Clock, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { formatTimeEastern } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { useLocation } from "wouter";
+import { DailySessionsModal } from "@/components/DailySessionsModal";
 
 function EventCard({ event }: { event: CalendarEvent }) {
   const startTime = formatTimeEastern(event.start);
@@ -107,7 +108,8 @@ export default function CalendarView() {
   };
   
   const [selectedDate, setSelectedDate] = useState<Date>(getInitialDate());
-  
+  const [showDailyPrep, setShowDailyPrep] = useState(false);
+
   // Update selected date when URL changes
   useEffect(() => {
     const urlParams = new URLSearchParams(location.split('?')[1]);
@@ -209,19 +211,32 @@ export default function CalendarView() {
 
             {/* Event count summary */}
             {data && (
-              <div className="flex items-center space-x-4 text-sm" data-testid="event-summary">
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 rounded-full bg-primary"></div>
-                  <span data-testid="count-therapy-sessions">
-                    {data.therapySessions} Therapy Session{data.therapySessions !== 1 ? 's' : ''}
-                  </span>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center space-x-4 text-sm" data-testid="event-summary">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 rounded-full bg-primary"></div>
+                    <span data-testid="count-therapy-sessions">
+                      {data.therapySessions} Therapy Session{data.therapySessions !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 rounded-full bg-secondary"></div>
+                    <span data-testid="count-other-events">
+                      {data.otherEvents} Other Event{data.otherEvents !== 1 ? 's' : ''}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 rounded-full bg-secondary"></div>
-                  <span data-testid="count-other-events">
-                    {data.otherEvents} Other Event{data.otherEvents !== 1 ? 's' : ''}
-                  </span>
-                </div>
+                {data.therapySessions > 0 && (
+                  <Button
+                    onClick={() => setShowDailyPrep(true)}
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto"
+                  >
+                    <Brain className="h-4 w-4 mr-2" />
+                    AI Session Prep
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -268,6 +283,13 @@ export default function CalendarView() {
           </div>
         )}
       </div>
+
+      {/* Daily Session Prep Modal */}
+      <DailySessionsModal
+        date={selectedDate}
+        open={showDailyPrep}
+        onClose={() => setShowDailyPrep(false)}
+      />
     </div>
   );
 }

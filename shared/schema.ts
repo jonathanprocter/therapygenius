@@ -130,6 +130,7 @@ export const sessions = pgTable("sessions", {
   sessionDate: timestamp("session_date").notNull(),
   duration: integer("duration"), // minutes
   sessionType: varchar("session_type", { length: 50 }), // individual, group, family
+  status: varchar("status", { length: 20 }).default("scheduled"), // scheduled, completed, cancelled, no-show
   notes: text("notes"),
   interventionsUsed: jsonb("interventions_used"),
   homework: text("homework"),
@@ -138,6 +139,7 @@ export const sessions = pgTable("sessions", {
   externalEventId: text("external_event_id"),
   sourceCalendar: text("source_calendar"),
   aiTags: jsonb("ai_tags"),
+  prepNotes: text("prep_notes"), // Therapist's preparation notes for the session
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

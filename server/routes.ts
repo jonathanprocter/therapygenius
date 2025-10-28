@@ -944,6 +944,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Session prep and insights routes
+  app.get("/api/sessions/:id/prep", async (req: Request, res) => {
+    try {
+      const { id } = req.params;
+      const { generateSessionPrep } = await import('./session-prep');
+
+      const prep = await generateSessionPrep(id, THERAPIST_ID);
+
+      if (!prep) {
+        return res.status(404).json({ message: "Could not generate session prep" });
+      }
+
+      res.json(prep);
+    } catch (error) {
+      console.error("Error generating session prep:", error);
+      res.status(500).json({ message: "Failed to generate session prep" });
+    }
+  });
+
+  app.get("/api/clients/:id/insights", async (req: Request, res) => {
+    try {
+      const { id } = req.params;
+      const { generateClientInsights } = await import('./session-prep');
+
+      const insights = await generateClientInsights(id, THERAPIST_ID);
+
+      if (!insights) {
+        return res.status(404).json({ message: "Could not generate client insights" });
+      }
+
+      res.json(insights);
+    } catch (error) {
+      console.error("Error generating client insights:", error);
+      res.status(500).json({ message: "Failed to generate client insights" });
+    }
+  });
+
+  app.put("/api/sessions/:id/prep-notes", async (req: Request, res) => {
+    try {
+      const { id } = req.params;
+      const { prepNotes } = req.body;
+
+      if (typeof prepNotes !== 'string') {
+        return res.status(400).json({ message: "prepNotes must be a string" });
+      }
+
+      const updatedSession = await storage.updateSession(id, { prepNotes }, THERAPIST_ID);
+
+      if (!updatedSession) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+
+      res.json(updatedSession);
+    } catch (error) {
+      console.error("Error updating session prep notes:", error);
+      res.status(500).json({ message: "Failed to update prep notes" });
+    }
+  });
+
+  app.get("/api/sessions/date/:date", async (req: Request, res) => {
+    try {
+      const { date } = req.params;
+
+      // Parse date in format YYYY-MM-DD
+      const targetDate = new Date(date);
+      if (isNaN(targetDate.getTime())) {
+        return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD" });
+      }
+
+      // Get all sessions for the therapist
+      const allSessions = await storage.getSessionsByTherapist(THERAPIST_ID);
+
+      // Filter sessions for the specific date
+      const sessionsOnDate = allSessions.filter(session => {
+        const sessionDate = new Date(session.sessionDate);
+        return sessionDate.toDateString() === targetDate.toDateString();
+      });
+
+      // Get client information for each session
+      const sessionsWithClients = await Promise.all(
+        sessionsOnDate.map(async (session) => {
+          const client = await storage.getClientById(session.clientId, THERAPIST_ID);
+          return {
+            ...session,
+            client
+          };
+        })
+      );
+
+      res.json(sessionsWithClients);
+    } catch (error) {
+      console.error("Error fetching sessions by date:", error);
+      res.status(500).json({ message: "Failed to fetch sessions" });
+    }
+  });
+
   // Calendar integration routes
   app.get("/api/calendar/auth", async (req: Request, res) => {
     try {
