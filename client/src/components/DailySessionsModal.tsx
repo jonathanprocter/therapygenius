@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { X, Loader2, Brain, AlertCircle, TrendingUp, Target, Lightbulb } from "lucide-react";
+import { X, Loader2, Brain, AlertCircle, TrendingUp, Target, Lightbulb, RefreshCw } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 interface Session {
   id: string;
   clientId: string;
-  sessionDate: Date;
+  sessionDate: string | Date;
   sessionType: string;
   status: string;
   notes: string | null;
@@ -29,7 +29,7 @@ interface Session {
     id: string;
     firstName: string;
     lastName: string;
-  };
+  } | null;
 }
 
 interface SessionPrep {
@@ -67,12 +67,25 @@ interface DailySessionsModalProps {
 
 export function DailySessionsModal({ date, open, onClose }: DailySessionsModalProps) {
   const queryClient = useQueryClient();
+  const dateString = format(date, 'yyyy-MM-dd');
 
   // Fetch sessions for the selected date
-  const { data: sessions, isLoading: sessionsLoading } = useQuery<Session[]>({
-    queryKey: [`/api/sessions/date/${format(date, 'yyyy-MM-dd')}`],
+  const { data: sessions, isLoading: sessionsLoading, error: sessionsError, refetch } = useQuery<Session[]>({
+    queryKey: ['sessions', 'date', dateString],
+    queryFn: async () => {
+      const response = await fetch(`/api/sessions/date/${dateString}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch sessions');
+      }
+      return response.json();
+    },
     enabled: open,
+    staleTime: 30000, // Consider data fresh for 30 seconds
   });
+
+  const handleRefresh = () => {
+    refetch();
+  };
 
   if (!open) return null;
 
@@ -80,16 +93,40 @@ export function DailySessionsModal({ date, open, onClose }: DailySessionsModalPr
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl max-h-[90vh]">
         <DialogHeader>
-          <DialogTitle className="text-2xl">
-            Sessions for {format(date, 'EEEE, MMMM d, yyyy')}
-          </DialogTitle>
-          <DialogDescription>
-            AI-powered session preparation and insights for today's appointments
-          </DialogDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle className="text-2xl">
+                Sessions for {format(date, 'EEEE, MMMM d, yyyy')}
+              </DialogTitle>
+              <DialogDescription>
+                AI-powered session preparation and insights for today's appointments
+              </DialogDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={sessionsLoading}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${sessionsLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
         </DialogHeader>
 
         <ScrollArea className="h-[calc(90vh-120px)] pr-4">
-          {sessionsLoading ? (
+          {sessionsError ? (
+            <div className="text-center py-12">
+              <AlertCircle className="h-12 w-12 mx-auto mb-4 text-destructive opacity-50" />
+              <p className="text-destructive font-medium mb-2">Error loading sessions</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                {sessionsError instanceof Error ? sessionsError.message : 'Unknown error'}
+              </p>
+              <Button onClick={handleRefresh} variant="outline">
+                Try Again
+              </Button>
+            </div>
+          ) : sessionsLoading ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
                 <Skeleton key={i} className="h-48 w-full" />
@@ -118,15 +155,36 @@ function SessionCard({ session }: { session: Session }) {
   const [prepNotes, setPrepNotes] = useState(session.prepNotes || '');
   const [activeTab, setActiveTab] = useState<'prep' | 'insights'>('prep');
 
+  // Update prepNotes when session changes
+  useEffect(() => {
+    setPrepNotes(session.prepNotes || '');
+  }, [session.prepNotes]);
+
   // Fetch session prep
-  const { data: prep, isLoading: prepLoading } = useQuery<SessionPrep>({
-    queryKey: [`/api/sessions/${session.id}/prep`],
+  const { data: prep, isLoading: prepLoading, error: prepError, refetch: refetchPrep } = useQuery<SessionPrep>({
+    queryKey: ['session-prep', session.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/sessions/${session.id}/prep`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch session prep');
+      }
+      return response.json();
+    },
+    staleTime: 60000, // Consider data fresh for 1 minute
   });
 
   // Fetch client insights
-  const { data: insights, isLoading: insightsLoading } = useQuery<ClientInsights>({
-    queryKey: [`/api/clients/${session.clientId}/insights`],
+  const { data: insights, isLoading: insightsLoading, error: insightsError, refetch: refetchInsights } = useQuery<ClientInsights>({
+    queryKey: ['client-insights', session.clientId],
+    queryFn: async () => {
+      const response = await fetch(`/api/clients/${session.clientId}/insights`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch client insights');
+      }
+      return response.json();
+    },
     enabled: activeTab === 'insights',
+    staleTime: 300000, // Consider data fresh for 5 minutes
   });
 
   // Mutation to save prep notes
@@ -137,11 +195,15 @@ function SessionCard({ session }: { session: Session }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prepNotes: notes }),
       });
-      if (!response.ok) throw new Error('Failed to save prep notes');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to save prep notes');
+      }
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/sessions/date/${format(session.sessionDate, 'yyyy-MM-dd')}`] });
+      const dateString = format(new Date(session.sessionDate), 'yyyy-MM-dd');
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'date', dateString] });
     },
   });
 
@@ -152,6 +214,18 @@ function SessionCard({ session }: { session: Session }) {
   };
 
   const sessionTime = format(new Date(session.sessionDate), 'h:mm a');
+
+  // Handle missing client gracefully
+  if (!session.client) {
+    return (
+      <Card className="p-6">
+        <div className="text-center py-6 text-muted-foreground">
+          <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p>Client information not available</p>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="overflow-hidden">
@@ -181,7 +255,15 @@ function SessionCard({ session }: { session: Session }) {
         {/* Middle Column: AI-Generated Key Themes */}
         <div className="space-y-4">
           {activeTab === 'prep' ? (
-            prepLoading ? (
+            prepError ? (
+              <div className="text-center py-6">
+                <AlertCircle className="h-8 w-8 mx-auto mb-2 text-destructive opacity-50" />
+                <p className="text-sm text-destructive mb-2">Error loading prep</p>
+                <Button onClick={() => refetchPrep()} variant="outline" size="sm">
+                  Retry
+                </Button>
+              </div>
+            ) : prepLoading ? (
               <div className="space-y-2">
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-4 w-full" />
@@ -260,6 +342,14 @@ function SessionCard({ session }: { session: Session }) {
             ) : (
               <p className="text-sm text-muted-foreground">No prep data available</p>
             )
+          ) : insightsError ? (
+            <div className="text-center py-6">
+              <AlertCircle className="h-8 w-8 mx-auto mb-2 text-destructive opacity-50" />
+              <p className="text-sm text-destructive mb-2">Error loading insights</p>
+              <Button onClick={() => refetchInsights()} variant="outline" size="sm">
+                Retry
+              </Button>
+            </div>
           ) : insightsLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -338,21 +428,33 @@ function SessionCard({ session }: { session: Session }) {
             className="min-h-[200px] resize-none"
           />
           {prepNotes && (
-            <Button
-              onClick={handleSavePrepNotes}
-              disabled={savePrepNotesMutation.isPending || prepNotes === session.prepNotes}
-              className="w-full"
-              size="sm"
-            >
-              {savePrepNotesMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save Notes'
+            <div className="space-y-2">
+              <Button
+                onClick={handleSavePrepNotes}
+                disabled={savePrepNotesMutation.isPending || prepNotes === session.prepNotes}
+                className="w-full"
+                size="sm"
+              >
+                {savePrepNotesMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Notes'
+                )}
+              </Button>
+              {savePrepNotesMutation.isError && (
+                <p className="text-xs text-destructive">
+                  {savePrepNotesMutation.error instanceof Error
+                    ? savePrepNotesMutation.error.message
+                    : 'Failed to save notes'}
+                </p>
               )}
-            </Button>
+              {savePrepNotesMutation.isSuccess && !savePrepNotesMutation.isPending && (
+                <p className="text-xs text-green-600">Notes saved successfully</p>
+              )}
+            </div>
           )}
         </div>
       </div>

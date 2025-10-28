@@ -1007,36 +1007,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { date } = req.params;
 
-      // Parse date in format YYYY-MM-DD
-      const targetDate = new Date(date);
+      console.log(`[Sessions by Date] Fetching sessions for date: ${date}`);
+
+      // Parse date in format YYYY-MM-DD and treat as UTC to avoid timezone issues
+      const targetDate = new Date(date + 'T00:00:00.000Z');
       if (isNaN(targetDate.getTime())) {
         return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD" });
       }
 
       // Get all sessions for the therapist
       const allSessions = await storage.getSessionsByTherapist(THERAPIST_ID);
+      console.log(`[Sessions by Date] Found ${allSessions.length} total sessions for therapist`);
 
-      // Filter sessions for the specific date
+      // Filter sessions for the specific date using UTC date comparison
       const sessionsOnDate = allSessions.filter(session => {
         const sessionDate = new Date(session.sessionDate);
-        return sessionDate.toDateString() === targetDate.toDateString();
+        // Compare using UTC date strings to avoid timezone issues
+        const sessionDateStr = sessionDate.toISOString().split('T')[0];
+        const targetDateStr = date;
+
+        const matches = sessionDateStr === targetDateStr;
+
+        if (matches) {
+          console.log(`[Sessions by Date] Match found - Session: ${sessionDate.toISOString()}, Target: ${targetDateStr}`);
+        }
+
+        return matches;
       });
+
+      console.log(`[Sessions by Date] Found ${sessionsOnDate.length} sessions on ${date}`);
 
       // Get client information for each session
       const sessionsWithClients = await Promise.all(
         sessionsOnDate.map(async (session) => {
-          const client = await storage.getClientById(session.clientId, THERAPIST_ID);
-          return {
-            ...session,
-            client
-          };
+          try {
+            const client = await storage.getClientById(session.clientId, THERAPIST_ID);
+            return {
+              ...session,
+              sessionDate: session.sessionDate.toISOString(), // Ensure consistent date format
+              client: client || null // Handle missing client gracefully
+            };
+          } catch (clientError) {
+            console.error(`[Sessions by Date] Error fetching client ${session.clientId}:`, clientError);
+            return {
+              ...session,
+              sessionDate: session.sessionDate.toISOString(),
+              client: null
+            };
+          }
         })
       );
 
+      console.log(`[Sessions by Date] Returning ${sessionsWithClients.length} sessions with client info`);
       res.json(sessionsWithClients);
     } catch (error) {
-      console.error("Error fetching sessions by date:", error);
-      res.status(500).json({ message: "Failed to fetch sessions" });
+      console.error("[Sessions by Date] Error fetching sessions:", error);
+      res.status(500).json({
+        message: "Failed to fetch sessions",
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
