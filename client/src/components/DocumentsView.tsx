@@ -66,20 +66,22 @@ export function DocumentsView() {
 
   const getDocumentStatusIcon = (document: Document) => {
     if (document.sessionId) {
-      return <Link2 className="w-4 h-4 text-green-600" title="Linked to session" />;
+      return <Link2 className="w-4 h-4 text-green-600" />;
     }
     if (document.sourceEventId) {
-      return <Calendar className="w-4 h-4 text-purple-600" title="From calendar" />;
+      return <Calendar className="w-4 h-4 text-purple-600" />;
     }
-    if (document.metadata?.potentialMatches && document.metadata.potentialMatches.length > 0) {
-      return <Target className="w-4 h-4 text-yellow-600" title="Has potential matches" />;
+    const metadata = document.metadata as any;
+    if (metadata?.potentialMatches && metadata.potentialMatches.length > 0) {
+      return <Target className="w-4 h-4 text-yellow-600" />;
     }
     return null;
   };
 
   const getConfidenceIndicator = (document: Document) => {
-    if (document.sessionId && document.metadata?.linkingConfidence) {
-      const confidence = document.metadata.linkingConfidence;
+    const metadata = document.metadata as any;
+    if (document.sessionId && metadata?.linkingConfidence) {
+      const confidence = metadata.linkingConfidence;
       const percentage = Math.round(confidence * 100);
       const color = confidence >= 0.9 ? 'text-green-600' : 
                    confidence >= 0.7 ? 'text-blue-600' : 
@@ -107,25 +109,27 @@ export function DocumentsView() {
 
   // Assessment status helper functions
   const getAssessmentStatusIcon = (document: Document) => {
-    const assessmentMetadata = document.metadata?.assessmentExtraction;
-    
+    const metadata = document.metadata as any;
+    const assessmentMetadata = metadata?.assessmentExtraction;
+
     if (assessmentMetadata?.assessmentsFound && assessmentMetadata.assessmentsFound.length > 0) {
-      return <CheckCircle className="w-4 h-4 text-green-600" title={`${assessmentMetadata.assessmentsFound.length} assessments found`} />;
+      return <CheckCircle className="w-4 h-4 text-green-600" />;
     }
-    
+
     if (assessmentMetadata?.processingStatus === 'processing') {
-      return <Clock className="w-4 h-4 text-blue-600" title="Processing assessments..." />;
+      return <Clock className="w-4 h-4 text-blue-600" />;
     }
-    
+
     if (assessmentMetadata?.hasAssessmentContent) {
-      return <Brain className="w-4 h-4 text-purple-600" title="Contains assessment content" />;
+      return <Brain className="w-4 h-4 text-purple-600" />;
     }
-    
+
     return null;
   };
 
   const getAssessmentStatusBadge = (document: Document) => {
-    const assessmentMetadata = document.metadata?.assessmentExtraction;
+    const metadata = document.metadata as any;
+    const assessmentMetadata = metadata?.assessmentExtraction;
     
     if (assessmentMetadata?.assessmentsFound && assessmentMetadata.assessmentsFound.length > 0) {
       return (

@@ -1367,25 +1367,23 @@ export class DatabaseStorage implements IStorage {
     lastSuccessfulSync: Date | null;
     recentErrors: string[];
   }> {
-    let baseQuery = db
-      .select()
-      .from(calendarSyncHistory)
-      .where(eq(calendarSyncHistory.therapistId, therapistId));
+    // Build conditions array
+    const conditions = [eq(calendarSyncHistory.therapistId, therapistId)];
 
-    // Apply filters
     if (options?.timeRange) {
-      baseQuery = baseQuery.where(
-        and(
-          gte(calendarSyncHistory.startTime, options.timeRange.start),
-          lte(calendarSyncHistory.startTime, options.timeRange.end)
-        )
+      conditions.push(
+        gte(calendarSyncHistory.startTime, options.timeRange.start),
+        lte(calendarSyncHistory.startTime, options.timeRange.end)
       );
     }
     if (options?.syncType) {
-      baseQuery = baseQuery.where(eq(calendarSyncHistory.syncType, options.syncType));
+      conditions.push(eq(calendarSyncHistory.syncType, options.syncType));
     }
 
-    const allSyncs = await baseQuery;
+    const allSyncs = await db
+      .select()
+      .from(calendarSyncHistory)
+      .where(and(...conditions));
 
     const totalSyncs = allSyncs.length;
     const successfulSyncs = allSyncs.filter(s => s.status === 'completed').length;
@@ -1604,6 +1602,9 @@ export class DatabaseStorage implements IStorage {
 
       // Calculate time window around document upload
       const uploadDate = document.uploadDate || document.createdAt;
+      if (!uploadDate) {
+        throw new Error('Document has no upload date or creation date');
+      }
       const windowMs = timeWindowHours * 60 * 60 * 1000;
       const startRange = new Date(uploadDate.getTime() - windowMs);
       const endRange = new Date(uploadDate.getTime() + windowMs);
@@ -1897,7 +1898,7 @@ export class DatabaseStorage implements IStorage {
       }
 
       // Get all sessions with AI tags
-      const sessions = await db
+      const clientSessions = await db
         .select()
         .from(sessions)
         .where(and(
@@ -1916,9 +1917,9 @@ export class DatabaseStorage implements IStorage {
           aiTags: client.aiTags
         },
         sessions: {
-          total: sessions.length,
-          withTags: sessions.filter(s => s.aiTags).length,
-          recent: sessions.slice(-5).map(s => ({
+          total: clientSessions.length,
+          withTags: clientSessions.filter(s => s.aiTags).length,
+          recent: clientSessions.slice(-5).map(s => ({
             id: s.id,
             date: s.sessionDate,
             aiTags: s.aiTags
@@ -2138,25 +2139,21 @@ export class DatabaseStorage implements IStorage {
   // Report generation and storage
   async getReportsByClient(clientId: string, therapistId: string, reportType?: string): Promise<Document[]> {
     try {
-      let query = db
-        .select()
-        .from(documents)
-        .where(and(
-          eq(documents.clientId, clientId),
-          eq(documents.therapistId, therapistId),
-          sql`${documents.metadata}->>'category' = 'Report'`
-        ));
+      const conditions = [
+        eq(documents.clientId, clientId),
+        eq(documents.therapistId, therapistId),
+        sql`${documents.metadata}->>'category' = 'Report'`
+      ];
 
       if (reportType) {
-        query = query.where(and(
-          eq(documents.clientId, clientId),
-          eq(documents.therapistId, therapistId),
-          sql`${documents.metadata}->>'category' = 'Report'`,
-          sql`${documents.metadata}->>'reportType' = ${reportType}`
-        ));
+        conditions.push(sql`${documents.metadata}->>'reportType' = ${reportType}`);
       }
 
-      return await query.orderBy(desc(documents.uploadDate));
+      return await db
+        .select()
+        .from(documents)
+        .where(and(...conditions))
+        .orderBy(desc(documents.uploadDate));
     } catch (error) {
       console.error('[Storage] Error getting reports by client:', error);
       throw new Error('Failed to get reports by client');
@@ -2165,23 +2162,21 @@ export class DatabaseStorage implements IStorage {
 
   async getReportsByTherapist(therapistId: string, reportType?: string, limit: number = 50): Promise<Document[]> {
     try {
-      let query = db
-        .select()
-        .from(documents)
-        .where(and(
-          eq(documents.therapistId, therapistId),
-          sql`${documents.metadata}->>'category' = 'Report'`
-        ));
+      const conditions = [
+        eq(documents.therapistId, therapistId),
+        sql`${documents.metadata}->>'category' = 'Report'`
+      ];
 
       if (reportType) {
-        query = query.where(and(
-          eq(documents.therapistId, therapistId),
-          sql`${documents.metadata}->>'category' = 'Report'`,
-          sql`${documents.metadata}->>'reportType' = ${reportType}`
-        ));
+        conditions.push(sql`${documents.metadata}->>'reportType' = ${reportType}`);
       }
 
-      return await query.orderBy(desc(documents.uploadDate)).limit(limit);
+      return await db
+        .select()
+        .from(documents)
+        .where(and(...conditions))
+        .orderBy(desc(documents.uploadDate))
+        .limit(limit);
     } catch (error) {
       console.error('[Storage] Error getting reports by therapist:', error);
       throw new Error('Failed to get reports by therapist');
@@ -2289,7 +2284,7 @@ export class DatabaseStorage implements IStorage {
       
       if (options.hasAssessmentContent) {
         // Look for documents that likely contain assessment content
-        conditions.push(or(
+        const assessmentCondition = or(
           sql`LOWER(${documents.fileName}) LIKE '%phq%'`,
           sql`LOWER(${documents.fileName}) LIKE '%gad%'`,
           sql`LOWER(${documents.fileName}) LIKE '%assessment%'`,
@@ -2297,7 +2292,10 @@ export class DatabaseStorage implements IStorage {
           sql`LOWER(${documents.content}) LIKE '%gad-7%'`,
           sql`LOWER(${documents.content}) LIKE '%beck%'`,
           sql`LOWER(${documents.content}) LIKE '%score%'`
-        ));
+        );
+        if (assessmentCondition) {
+          conditions.push(assessmentCondition);
+        }
       }
       
       const documentIds = await query
@@ -2338,17 +2336,20 @@ export class DatabaseStorage implements IStorage {
     trendsAnalysis: any;
   }> {
     try {
-      let query = db.select().from(assessments).where(eq(assessments.therapistId, therapistId));
-      
+      const conditions = [eq(assessments.therapistId, therapistId)];
+
       if (timeRange) {
-        query = query.where(and(
-          eq(assessments.therapistId, therapistId),
+        conditions.push(
           gte(assessments.assessmentDate, timeRange.start),
           lte(assessments.assessmentDate, timeRange.end)
-        ));
+        );
       }
-      
-      const assessmentData = await query.orderBy(assessments.assessmentDate);
+
+      const assessmentData = await db
+        .select()
+        .from(assessments)
+        .where(and(...conditions))
+        .orderBy(assessments.assessmentDate);
       
       // Calculate statistics
       const totalAssessments = assessmentData.length;

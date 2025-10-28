@@ -65,13 +65,13 @@ export function DocumentAutoLinking({ document, className }: DocumentAutoLinking
   const { toast } = useToast();
 
   // Get potential session matches
-  const { data: potentialMatches, isLoading: matchesLoading } = useQuery({
+  const { data: potentialMatches, isLoading: matchesLoading } = useQuery<{ potentialMatches: PotentialMatch[] }>({
     queryKey: ['/api/documents', document.id, 'potential-matches'],
     enabled: !!document.id && !document.sessionId,
   });
 
   // Get auto-linking metadata
-  const { data: linkingMetadata, isLoading: metadataLoading } = useQuery({
+  const { data: linkingMetadata, isLoading: metadataLoading } = useQuery<LinkingMetadata>({
     queryKey: ['/api/documents', document.id, 'auto-linking-metadata'],
     enabled: !!document.id,
   });
@@ -157,7 +157,8 @@ export function DocumentAutoLinking({ document, className }: DocumentAutoLinking
     });
   };
 
-  const isCalendarLinked = document.sourceEventId || document.metadata?.sourceCalendar;
+  const docMetadata = document.metadata as any;
+  const isCalendarLinked = document.sourceEventId || docMetadata?.sourceCalendar;
   const metadata: LinkingMetadata = linkingMetadata || {
     documentId: document.id,
     potentialMatches: potentialMatches?.potentialMatches || [],

@@ -45,7 +45,7 @@ export function CalendarSync({ className, showFullDashboard = false }: CalendarS
   const { toast } = useToast();
 
   // Get calendar sync status
-  const { data: syncStatus, isLoading: statusLoading, refetch: refetchStatus } = useQuery({
+  const { data: syncStatus, isLoading: statusLoading, refetch: refetchStatus } = useQuery<CalendarSyncStatus>({
     queryKey: ['/api/calendar/status'],
     refetchInterval: 30000, // Refresh every 30 seconds
   });

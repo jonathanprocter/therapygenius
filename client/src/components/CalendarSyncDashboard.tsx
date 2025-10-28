@@ -28,6 +28,19 @@ import { queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { CalendarSync } from './CalendarSync';
 
+interface CalendarSyncStatus {
+  isAuthenticated: boolean;
+  lastSync?: string;
+  eventsProcessed: number;
+  matchesFound: number;
+  errors: string[];
+  nextSync?: string;
+  syncType: 'full' | 'incremental';
+  syncToken?: string;
+  rateLimitRemaining?: number;
+  quotaUsed?: number;
+}
+
 interface SyncHistoryEntry {
   timestamp: string;
   eventsProcessed: number;
@@ -60,7 +73,7 @@ export function CalendarSyncDashboard({ className }: CalendarSyncDashboardProps)
   const { toast } = useToast();
 
   // Get calendar sync status
-  const { data: syncStatus, isLoading: statusLoading } = useQuery({
+  const { data: syncStatus, isLoading: statusLoading } = useQuery<CalendarSyncStatus>({
     queryKey: ['/api/calendar/status'],
     refetchInterval: 30000,
   });

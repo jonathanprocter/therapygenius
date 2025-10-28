@@ -1,3 +1,4 @@
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -10,7 +11,7 @@ interface ClientProfileProps {
   className?: string;
 }
 
-export function ClientProfile({ client, recentAssessments = [], className }: ClientProfileProps) {
+export function ClientProfile({ client, recentAssessments = [], className }: ClientProfileProps): React.ReactElement {
   // Using Eastern Time utilities for consistent timezone calculations
   const calculateAge = calculateAgeEastern;
 
