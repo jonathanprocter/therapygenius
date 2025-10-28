@@ -5,7 +5,13 @@ import { z } from "zod";
 
 // Enhanced Zod schema for document analysis validation with auto-linking support
 const documentAnalysisSchema = z.object({
-  category: z.enum(["Assessment", "Session Note", "Session Transcript", "Progress Note", "Treatment Plan", "Correspondence", "Legal", "Insurance", "Other"]),
+  category: z.enum(["Assessment", "Session Note", "Treatment Plan", "Correspondence", "Legal", "Insurance", "Other"]),
+  // New field to track document format/processing status
+  documentFormat: z.object({
+    type: z.enum(["transcript", "progress_note", "clinical_note", "intake_note", "discharge_summary", "unknown"]),
+    needsProcessing: z.boolean(),
+    processingNotes: z.string().optional()
+  }),
   tags: z.array(z.string()),
   entities: z.object({
     medications: z.array(z.string()).optional(),
@@ -76,7 +82,12 @@ Available clients: ${clientNames.join(", ")}
 
 Please provide a comprehensive analysis in the following JSON format:
 {
-  "category": "Assessment|Session Note|Session Transcript|Progress Note|Treatment Plan|Correspondence|Legal|Insurance|Other",
+  "category": "Assessment|Session Note|Treatment Plan|Correspondence|Legal|Insurance|Other",
+  "documentFormat": {
+    "type": "transcript|progress_note|clinical_note|intake_note|discharge_summary|unknown",
+    "needsProcessing": true,
+    "processingNotes": "Explain why this document needs or doesn't need processing"
+  },
   "tags": ["tag1", "tag2", "tag3"],
   "entities": {
     "medications": ["medication names if any"],
@@ -123,29 +134,51 @@ Please provide a comprehensive analysis in the following JSON format:
 
 ENHANCED ANALYSIS GUIDELINES:
 1. **Category Classification**: Determine the primary document type based on content structure and purpose
-   - **Session Transcript**: Verbatim or near-verbatim dialogue between therapist and client, conversation-style format, Q&A structure
-   - **Progress Note**: Clinical summary written by therapist, SOAP/DAP format, professional clinical language, treatment plan updates
-   - **Session Note**: General session documentation that doesn't clearly fit transcript or progress note categories
-2. **Entity Extraction**: Extract ALL relevant clinical entities including medications, diagnoses, symptoms, interventions, goals, and assessment types
-3. **Client Matching**: Use names, demographic info, and context clues to match clients with confidence scores
-4. **Session Context Analysis**: 
+   - All session-related documents should be categorized as "Session Note"
+
+2. **Document Format Detection** (CRITICAL for processing workflow):
+   - **transcript**: Raw verbatim dialogue, Q&A format, conversation-style, Speaker labels (Therapist:/Client:)
+     * needsProcessing = TRUE (requires conversion to clinical note)
+     * processingNotes: "Raw transcript requiring conversion to SOAP/DAP format"
+
+   - **progress_note**: Already formatted clinical note, SOAP/DAP/BIRP format, professional clinical language
+     * needsProcessing = FALSE (ready to use as-is)
+     * processingNotes: "Already in clinical format, no processing needed"
+
+   - **clinical_note**: Narrative clinical documentation, professional but not SOAP format
+     * needsProcessing = FALSE (ready to use)
+
+   - **intake_note**: Initial assessment/intake documentation
+     * needsProcessing = FALSE (specialized format, ready to use)
+
+3. **Entity Extraction**: Extract ALL relevant clinical entities including medications, diagnoses, symptoms, interventions, goals, and assessment types
+4. **Client Matching**: Use names, demographic info, and context clues to match clients with confidence scores
+5. **Session Context Analysis**: 
    - Determine likely session type from content (individual therapy vs group vs family)
    - Extract any mentioned or implied session dates
    - Identify therapy phase (intake assessment vs ongoing treatment vs termination)
    - Assess urgency level based on content and tone
-5. **Linking Hints Extraction**: Find specific references that help link to sessions:
+6. **Linking Hints Extraction**: Find specific references that help link to sessions:
    - Time references (relative dates, appointment times)
    - Direct appointment mentions
    - Session numbering or sequencing
    - Follow-up references
    - **Explicit dates**: Extract any specific dates mentioned (e.g., "7/5/2024", "July 5, 2024", "session on 07-05-2024")
-6. **Therapy Concepts**: Extract sophisticated clinical concepts:
+7. **Therapy Concepts**: Extract sophisticated clinical concepts:
    - Therapeutic approaches and modalities used
    - Clinical terminology and techniques
    - Progress indicators and outcomes
    - Risk factors requiring attention
    - Client strengths and resources
-7. **Auto-Linking Optimization**: Focus on extracting information that will help the system automatically link this document to the correct therapy session within a ±48 hour window
+8. **Auto-Linking Optimization**: Focus on extracting information that will help the system automatically link this document to the correct therapy session within a ±48 hour window
+
+CRITICAL PROCESSING DECISION RULES:
+- If document contains speaker labels like "Therapist:", "Client:", "T:", "C:" → type="transcript", needsProcessing=TRUE
+- If document has conversational Q&A format with minimal clinical terminology → type="transcript", needsProcessing=TRUE
+- If document follows SOAP format (Subjective/Objective/Assessment/Plan) → type="progress_note", needsProcessing=FALSE
+- If document follows DAP format (Data/Assessment/Plan) → type="progress_note", needsProcessing=FALSE
+- If document has professional clinical summary with diagnosis codes → type="progress_note", needsProcessing=FALSE
+- If document is narrative but uses clinical language and structure → type="clinical_note", needsProcessing=FALSE
 
 Prioritize accuracy and completeness for auto-linking functionality.
 `;
@@ -644,8 +677,50 @@ export const createDeterministicAnalysis = (document: Document, context: { thera
     keyInsights.push('Comprehensive documentation');
   }
   
+  // Determine document format and processing needs (for Session Notes)
+  let documentFormat: { type: any; needsProcessing: boolean; processingNotes?: string } = {
+    type: 'unknown',
+    needsProcessing: false,
+    processingNotes: 'Unable to determine format without AI analysis'
+  };
+
+  if (category === 'Session Note') {
+    // Check for transcript indicators
+    const hasTranscriptMarkers =
+      content.toLowerCase().includes('therapist:') ||
+      content.toLowerCase().includes('client:') ||
+      /\b(therapist|client)\s*:/i.test(content);
+
+    // Check for progress note indicators
+    const hasProgressNoteMarkers =
+      content.toLowerCase().includes('subjective:') ||
+      content.toLowerCase().includes('objective:') ||
+      /soap|dap|birp/i.test(content.toLowerCase());
+
+    if (hasTranscriptMarkers) {
+      documentFormat = {
+        type: 'transcript',
+        needsProcessing: true,
+        processingNotes: 'Detected transcript format - requires conversion to clinical note'
+      };
+    } else if (hasProgressNoteMarkers) {
+      documentFormat = {
+        type: 'progress_note',
+        needsProcessing: false,
+        processingNotes: 'Detected structured progress note format - ready to use'
+      };
+    } else {
+      documentFormat = {
+        type: 'clinical_note',
+        needsProcessing: false,
+        processingNotes: 'Clinical narrative format - ready to use'
+      };
+    }
+  }
+
   return {
     category: category as any,
+    documentFormat,
     tags: foundKeywords,
     entities: {
       medications: [],
@@ -671,7 +746,8 @@ export const createDeterministicAnalysis = (document: Document, context: { thera
       timeReferences: [],
       appointmentMentions: [],
       sessionNumbers: [],
-      followUpReferences: []
+      followUpReferences: [],
+      explicitDates: []
     },
     therapyConcepts: {
       therapeuticApproaches: [],

@@ -247,18 +247,28 @@ export const processDocumentWithAutoLinking = async (
       }
       
       result.analysisResults = analysisResults;
-      
-      // Update document with analysis results
+
+      // Update document with analysis results including processing status
       await storage.updateDocumentAnalysis(
         document.id,
         analysisResults,
-        { 
+        {
           category: analysisResults.category,
           tags: analysisResults.tags,
-          keyInsights: analysisResults.keyInsights
+          keyInsights: analysisResults.keyInsights,
+          documentFormat: analysisResults.documentFormat,
+          needsProcessing: analysisResults.documentFormat?.needsProcessing
         },
         context.therapistId
       );
+
+      // Log processing status for transparency
+      console.log(`[Document Processor] Document ${document.id} format analysis:`, {
+        category: analysisResults.category,
+        format: analysisResults.documentFormat?.type,
+        needsProcessing: analysisResults.documentFormat?.needsProcessing,
+        reason: analysisResults.documentFormat?.processingNotes
+      });
 
       // Step 1.5: Assessment Generation (NEW)
       await triggerAssessmentGeneration(document, analysisResults, context);
