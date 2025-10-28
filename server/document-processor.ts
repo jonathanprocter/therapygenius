@@ -8,6 +8,7 @@ import { aiRouter } from "./ai";
 import { storage } from "./storage";
 import { analyzeDocument, extractCalendarContext, analyzeDocumentForSessionMatching, createDeterministicAnalysis } from "./documentTagger";
 import { Document, Session } from "@shared/schema";
+import { extractBestDate } from "./dateExtraction";
 
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
@@ -362,6 +363,60 @@ export const processDocumentWithAutoLinking = async (
             session: bestMatch.session
           };
           console.log(`[Document Processor] Auto-linked to session ${bestMatch.session.id} with confidence ${bestMatch.confidence}`);
+        } else if (context.clientId) {
+          // Step 2.5: Create standalone session if no match found but client is known
+          console.log(`[Document Processor] No high-confidence session match found. Attempting to create standalone session from document date.`);
+
+          try {
+            // Extract date from document
+            const extractedDate = extractBestDate(document.fileName, document.content || '');
+
+            if (extractedDate && extractedDate.confidence >= 0.75) {
+              console.log(`[Document Processor] Extracted date from ${extractedDate.source}: ${extractedDate.date.toISOString()} (confidence: ${extractedDate.confidence})`);
+
+              // Create a standalone session for this document
+              const sessionData = {
+                therapistId: context.therapistId,
+                clientId: context.clientId,
+                sessionDate: extractedDate.date,
+                sessionType: 'Chart Note',
+                status: 'completed' as const,
+                notes: `Standalone chart note created from uploaded document: ${document.fileName}\nDate extracted from: ${extractedDate.source} (${extractedDate.matchedPattern})`,
+                duration: null
+              };
+
+              const newSession = await storage.createSession(sessionData);
+
+              if (newSession) {
+                // Link document to newly created session
+                await storage.linkDocumentToSession(
+                  document.id,
+                  newSession.id,
+                  context.therapistId,
+                  extractedDate.confidence
+                );
+
+                result.sessionMatch = {
+                  sessionId: newSession.id,
+                  confidence: extractedDate.confidence,
+                  matchReason: `Standalone session created from extracted date (${extractedDate.source}: ${extractedDate.matchedPattern})`,
+                  session: newSession
+                };
+
+                console.log(`[Document Processor] Created standalone session ${newSession.id} and linked document`);
+              }
+            } else {
+              console.log(`[Document Processor] Could not extract date with sufficient confidence (min 0.75). No standalone session created.`);
+              if (extractedDate) {
+                console.log(`[Document Processor] Found date with low confidence: ${extractedDate.confidence}`);
+              }
+            }
+          } catch (dateError) {
+            console.error('[Document Processor] Error creating standalone session:', dateError);
+            result.errors?.push(`Standalone session creation failed: ${dateError instanceof Error ? dateError.message : String(dateError)}`);
+          }
+        } else {
+          console.log(`[Document Processor] No session match found and no client ID provided. Document remains unlinked.`);
         }
       }
     } catch (error) {

@@ -2,6 +2,7 @@ import { Document, Client } from "@shared/schema";
 import { storage } from "./storage";
 import { aiRouter } from "./ai";
 import { z } from "zod";
+import { findBestClientMatch } from "./nameUtils";
 
 // Enhanced Zod schema for document analysis validation with auto-linking support
 const documentAnalysisSchema = z.object({
@@ -197,14 +198,32 @@ Prioritize accuracy and completeness for auto-linking functionality.
       }
     );
 
-    // If a client match was suggested, find the actual client ID
+    // If a client match was suggested, find the actual client ID using sophisticated name matching
     if (analysisResult.clientMatch && analysisResult.clientMatch.confidence > 0.7) {
-      const matchedClient = clients.find(client => 
-        `${client.firstName} ${client.lastName}`.toLowerCase()
-          .includes(analysisResult.clientMatch?.suggestedClientId?.toLowerCase() || "")
-      );
-      if (matchedClient && analysisResult.clientMatch) {
-        analysisResult.clientMatch.suggestedClientId = matchedClient.id;
+      const searchName = analysisResult.clientMatch.suggestedClientId || "";
+
+      // Parse the suggested name (might be "FirstName LastName" format)
+      const nameParts = searchName.trim().split(/\s+/);
+      let searchFirstName = nameParts[0] || "";
+      let searchLastName = nameParts[nameParts.length - 1] || "";
+
+      // If only one part, try to match against either first or last name
+      if (nameParts.length === 1) {
+        // Try matching against full name string
+        const match = findBestClientMatch(searchName, "", clients, 0.7);
+        if (match) {
+          analysisResult.clientMatch.suggestedClientId = match.client.id;
+          analysisResult.clientMatch.confidence = match.match.confidence;
+          console.log(`[Document Tagger] Client matched: ${match.client.firstName} ${match.client.lastName} (${match.match.matchType}, confidence: ${match.match.confidence})`);
+        }
+      } else {
+        // Use sophisticated name matching with nickname and middle initial handling
+        const match = findBestClientMatch(searchFirstName, searchLastName, clients, 0.7);
+        if (match) {
+          analysisResult.clientMatch.suggestedClientId = match.client.id;
+          analysisResult.clientMatch.confidence = match.match.confidence;
+          console.log(`[Document Tagger] Client matched: ${match.client.firstName} ${match.client.lastName} (${match.match.matchType}, confidence: ${match.match.confidence})`);
+        }
       }
     }
 

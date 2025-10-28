@@ -5,6 +5,7 @@ import { aiRouter } from './ai';
 import { encryptionService, EncryptionAuditLogger } from './encryption';
 import { z } from 'zod';
 import { toEasternDate } from './lib/eastern-time';
+import { findBestClientMatch, matchClientName } from './nameUtils';
 
 // Background sync scheduler for managing per-user sync schedules
 class CalendarSyncScheduler {
@@ -1494,78 +1495,73 @@ class CalendarSyncService {
    */
   private findFuzzyNameMatch(eventInfo: any, clients: any[]): ClientMatch | null {
     const eventTitle = eventInfo.title.toLowerCase();
-    
-    // Common nickname mappings
-    const nicknameMap: { [key: string]: string[] } = {
-      'bob': ['robert', 'rob', 'bobby'],
-      'bill': ['william', 'will', 'billy'],
-      'jim': ['james', 'jimmy'],
-      'mike': ['michael', 'mick', 'mickey'],
-      'dave': ['david', 'davy'],
-      'joe': ['joseph', 'joey'],
-      'tom': ['thomas', 'tommy'],
-      'dan': ['daniel', 'danny'],
-      'chris': ['christopher', 'christian'],
-      'matt': ['matthew', 'matty'],
-      'rick': ['richard', 'ricky'],
-      'steve': ['stephen', 'steven'],
-      'jeff': ['jeffrey', 'geoffrey'],
-      'nick': ['nicholas', 'nicolas'],
-      'sam': ['samuel', 'samantha'],
-      'alex': ['alexander', 'alexandra', 'alexis'],
-      'beth': ['elizabeth', 'betsy', 'betty'],
-      'sue': ['susan', 'suzanne'],
-      'liz': ['elizabeth', 'lisa'],
-      'kate': ['katherine', 'kathryn', 'katie'],
-      'jen': ['jennifer', 'jenny'],
-      'jess': ['jessica', 'jessie']
-    };
-    
-    // Reverse mapping for lookup
-    const reverseNicknameMap: { [key: string]: string[] } = {};
-    Object.entries(nicknameMap).forEach(([nickname, fullNames]) => {
-      fullNames.forEach(fullName => {
-        if (!reverseNicknameMap[fullName]) {
-          reverseNicknameMap[fullName] = [];
-        }
-        reverseNicknameMap[fullName].push(nickname);
-      });
-    });
-    
-    for (const client of clients) {
-      const firstName = client.firstName.toLowerCase();
-      const lastName = client.lastName.toLowerCase();
-      
-      // 1. Check nickname variations
-      const possibleNicknames = reverseNicknameMap[firstName] || [];
-      for (const nickname of possibleNicknames) {
-        if (eventTitle.includes(nickname)) {
+    const eventWords = eventTitle.split(/\s+/);
+
+    // STEP 1: Try sophisticated name matching with nickname and middle initial handling
+    // Extract potential names from event title (words with 2+ letters that aren't common words)
+    const commonWords = ['with', 'and', 'the', 'for', 'session', 'therapy', 'appointment', 'meeting', 'call', 'video', 'zoom'];
+    const potentialNameWords = eventWords.filter(word =>
+      word.length >= 2 &&
+      !commonWords.includes(word) &&
+      !/^\d+$/.test(word) // Not a number
+    );
+
+    // Try to match all pairs of words as potential first/last name combinations
+    for (let i = 0; i < potentialNameWords.length; i++) {
+      for (let j = i + 1; j < potentialNameWords.length; j++) {
+        const word1 = potentialNameWords[i];
+        const word2 = potentialNameWords[j];
+
+        // Try both orders (word1 word2 and word2 word1)
+        const match1 = findBestClientMatch(word1, word2, clients, 0.85);
+        if (match1) {
           return {
-            clientId: client.id,
-            confidence: 0.85,
-            matchReason: `Fuzzy match: nickname '${nickname}' for '${firstName}'`,
-            client
+            clientId: match1.client.id,
+            confidence: match1.match.confidence,
+            matchReason: `Enhanced fuzzy match: ${match1.match.matchType} match for '${word1} ${word2}' → '${match1.client.firstName} ${match1.client.lastName}'`,
+            client: match1.client
+          };
+        }
+
+        const match2 = findBestClientMatch(word2, word1, clients, 0.85);
+        if (match2) {
+          return {
+            clientId: match2.client.id,
+            confidence: match2.match.confidence,
+            matchReason: `Enhanced fuzzy match: ${match2.match.matchType} match for '${word2} ${word1}' → '${match2.client.firstName} ${match2.client.lastName}'`,
+            client: match2.client
           };
         }
       }
-      
-      // Check if event contains a nickname that maps to client's name
-      Object.entries(nicknameMap).forEach(([nickname, possibleNames]) => {
-        if (eventTitle.includes(nickname) && possibleNames.includes(firstName)) {
-          return {
-            clientId: client.id,
-            confidence: 0.85,
-            matchReason: `Fuzzy match: '${nickname}' matches '${firstName}'`,
-            client
-          };
+    }
+
+    // STEP 2: Try single-word matches against each client (for cases like "Chris" without last name)
+    for (const word of potentialNameWords) {
+      if (word.length >= 3) {
+        for (const client of clients) {
+          const nameMatch = matchClientName(word, '', client.firstName, client.lastName);
+          if (nameMatch.matched && nameMatch.confidence >= 0.85) {
+            return {
+              clientId: client.id,
+              confidence: nameMatch.confidence * 0.9, // Slightly lower confidence for single-word matches
+              matchReason: `Enhanced fuzzy match: ${nameMatch.matchType} match for single name '${word}'`,
+              client
+            };
+          }
         }
-      });
-      
-      // 2. Initial-based matching (e.g., "J.K." for "John Kennedy")
+      }
+    }
+
+    // STEP 3: Fall back to original fuzzy logic for special cases (initials, Levenshtein, etc.)
+    for (const client of clients) {
+      const firstName = client.firstName.toLowerCase();
+      const lastName = client.lastName.toLowerCase();
+
+      // Initial-based matching (e.g., "J.K." for "John Kennedy")
       const initials = `${firstName.charAt(0)}.${lastName.charAt(0)}.`;
       const initialsNoDots = `${firstName.charAt(0)}${lastName.charAt(0)}`;
       const initialsSpaced = `${firstName.charAt(0)}. ${lastName.charAt(0)}.`;
-      
+
       if (eventTitle.includes(initials) || eventTitle.includes(initialsNoDots) || eventTitle.includes(initialsSpaced)) {
         return {
           clientId: client.id,
@@ -1574,50 +1570,22 @@ class CalendarSyncService {
           client
         };
       }
-      
-      // 3. Common misspelling patterns
-      const commonMisspellings = [
-        // Remove/add common letters
-        firstName.replace('ph', 'f'),  // Stephen -> Stefen
-        firstName.replace('f', 'ph'),   // Stefen -> Stephen
-        firstName.replace('c', 'k'),    // Catherine -> Katherine
-        firstName.replace('k', 'c'),    // Katherine -> Catherine
-        firstName.replace('y', 'ie'),   // Tony -> Tonie
-        firstName.replace('ie', 'y'),   // Tonie -> Tony
-        // Double letters
-        firstName.replace(/([a-z])\1/, '$1'), // Remove double letters
-        firstName.replace(/([aeiou])/, '$1$1'), // Add double vowels (limited)
-      ];
-      
-      for (const variant of commonMisspellings) {
-        if (variant !== firstName && variant.length > 2 && eventTitle.includes(variant)) {
-          return {
-            clientId: client.id,
-            confidence: 0.75,
-            matchReason: `Fuzzy match: spelling variant '${variant}' for '${firstName}'`,
-            client
-          };
-        }
-      }
-      
-      // 4. Middle name handling - check if event contains parts that could be middle names
-      const eventWords = eventTitle.split(/\s+/);
-      const clientNameParts = [firstName, lastName];
-      
+
+      // Middle name handling - check if event contains parts that could be middle names
       // Look for patterns like "FirstName MiddleName LastName" where we only have "FirstName LastName"
-      for (let i = 0; i < eventWords.length - 1; i++) {
+      for (let i = 0; i < eventWords.length - 2; i++) {
         if (eventWords[i] === firstName && eventWords[i + 2] === lastName) {
-          // Potential middle name at i+1
+          // Potential middle name/initial at i+1
           return {
             clientId: client.id,
-            confidence: 0.8,
-            matchReason: `Fuzzy match: potential middle name pattern '${eventWords[i]} ${eventWords[i+1]} ${eventWords[i+2]}'`,
+            confidence: 0.85,
+            matchReason: `Fuzzy match: middle name pattern '${eventWords[i]} ${eventWords[i+1]} ${eventWords[i+2]}'`,
             client
           };
         }
       }
-      
-      // 5. Partial name matching with higher tolerance
+
+      // Levenshtein distance for typos/misspellings
       const levenshteinDistance = (a: string, b: string): number => {
         const matrix = [];
         for (let i = 0; i <= b.length; i++) {
@@ -1641,37 +1609,37 @@ class CalendarSyncService {
         }
         return matrix[b.length][a.length];
       };
-      
-      // Check for close matches using edit distance
+
+      // Check for close matches using edit distance (for typos)
       for (const word of eventWords) {
         if (word.length > 3) {
           const firstNameDistance = levenshteinDistance(word, firstName);
           const lastNameDistance = levenshteinDistance(word, lastName);
-          
+
           // Allow 1-2 character differences for names > 4 characters
           const maxDistance = Math.max(1, Math.floor(firstName.length * 0.3));
-          
+
           if (firstNameDistance <= maxDistance && firstNameDistance > 0) {
             return {
               clientId: client.id,
               confidence: 0.7,
-              matchReason: `Fuzzy match: '${word}' close to '${firstName}' (distance: ${firstNameDistance})`,
+              matchReason: `Fuzzy match: '${word}' close to '${firstName}' (edit distance: ${firstNameDistance})`,
               client
             };
           }
-          
+
           if (lastNameDistance <= maxDistance && lastNameDistance > 0) {
             return {
               clientId: client.id,
               confidence: 0.7,
-              matchReason: `Fuzzy match: '${word}' close to '${lastName}' (distance: ${lastNameDistance})`,
+              matchReason: `Fuzzy match: '${word}' close to '${lastName}' (edit distance: ${lastNameDistance})`,
               client
             };
           }
         }
       }
     }
-    
+
     return null;
   }
 
