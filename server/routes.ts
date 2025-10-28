@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { upload, extractTextFromFile, getFileMimeType, ensureUploadDir, processDocumentWithAutoLinking, DocumentUploadContext } from "./document-processor";
 import { analyzeDocument, generateCaseConceptualization, analyzeDocumentForSessionMatching, extractCalendarContext, generateAutoLinkingMetadata } from "./documentTagger";
 import { repairDocumentSystem, verifyDocumentIntegrity, cleanupOrphanedFiles } from "./document-fix";
+import { processTranscriptDocument, batchProcessTranscripts, convertTranscriptToProgressNote } from "./transcript-processor";
 import { insertClientSchema, insertSessionSchema, insertAssessmentSchema, insertTreatmentPlanSchema, insertCalendarEventReviewSchema, insertCalendarEventAliasSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -467,6 +468,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error linking document to client:", error);
       res.status(500).json({ message: "Failed to link document to client" });
+    }
+  });
+
+  // Process transcript into progress note (convert transcript to clinical note)
+  app.post("/api/documents/:id/process-transcript", async (req: Request, res) => {
+    try {
+      const result = await processTranscriptDocument(req.params.id, THERAPIST_ID);
+
+      if (!result.success) {
+        return res.status(400).json({
+          message: result.error || "Failed to process transcript",
+          error: result.error
+        });
+      }
+
+      res.json({
+        message: "Transcript processed successfully",
+        processedDocumentId: result.processedDocumentId
+      });
+    } catch (error) {
+      console.error("Error processing transcript:", error);
+      res.status(500).json({ message: "Failed to process transcript" });
+    }
+  });
+
+  // Batch process all transcripts that need processing
+  app.post("/api/documents/batch-process-transcripts", async (req: Request, res) => {
+    try {
+      const limit = req.body.limit || 10;
+      const result = await batchProcessTranscripts(THERAPIST_ID, limit);
+
+      res.json({
+        message: `Batch processing complete: ${result.processed} processed, ${result.failed} failed`,
+        processed: result.processed,
+        failed: result.failed,
+        results: result.results
+      });
+    } catch (error) {
+      console.error("Error in batch transcript processing:", error);
+      res.status(500).json({ message: "Failed to batch process transcripts" });
+    }
+  });
+
+  // Get all documents that need processing
+  app.get("/api/documents/needs-processing", async (req: Request, res) => {
+    try {
+      const documents = await storage.getDocumentsByTherapist(THERAPIST_ID);
+      const needsProcessing = documents.filter(doc => {
+        const metadata = doc.metadata as any;
+        return metadata?.documentFormat?.needsProcessing && !doc.isProcessed;
+      });
+
+      res.json(needsProcessing);
+    } catch (error) {
+      console.error("Error fetching documents needing processing:", error);
+      res.status(500).json({ message: "Failed to fetch documents needing processing" });
     }
   });
 
