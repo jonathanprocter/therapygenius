@@ -5,7 +5,7 @@ import { z } from "zod";
 
 // Enhanced Zod schema for document analysis validation with auto-linking support
 const documentAnalysisSchema = z.object({
-  category: z.enum(["Assessment", "Session Note", "Treatment Plan", "Correspondence", "Legal", "Insurance", "Other"]),
+  category: z.enum(["Assessment", "Session Note", "Session Transcript", "Progress Note", "Treatment Plan", "Correspondence", "Legal", "Insurance", "Other"]),
   tags: z.array(z.string()),
   entities: z.object({
     medications: z.array(z.string()).optional(),
@@ -39,7 +39,8 @@ const documentAnalysisSchema = z.object({
     timeReferences: z.array(z.string()).nullable().optional(),
     appointmentMentions: z.array(z.string()).nullable().optional(),
     sessionNumbers: z.array(z.string()).nullable().optional(),
-    followUpReferences: z.array(z.string()).nullable().optional()
+    followUpReferences: z.array(z.string()).nullable().optional(),
+    explicitDates: z.array(z.string()).nullable().optional()
   }).optional(),
   therapyConcepts: z.object({
     therapeuticApproaches: z.array(z.string()).nullable().optional(),
@@ -75,7 +76,7 @@ Available clients: ${clientNames.join(", ")}
 
 Please provide a comprehensive analysis in the following JSON format:
 {
-  "category": "Assessment|Session Note|Treatment Plan|Correspondence|Legal|Insurance|Other",
+  "category": "Assessment|Session Note|Session Transcript|Progress Note|Treatment Plan|Correspondence|Legal|Insurance|Other",
   "tags": ["tag1", "tag2", "tag3"],
   "entities": {
     "medications": ["medication names if any"],
@@ -108,7 +109,8 @@ Please provide a comprehensive analysis in the following JSON format:
     "timeReferences": ["today", "last week", "next appointment"],
     "appointmentMentions": ["scheduled for", "follow-up appointment"],
     "sessionNumbers": ["session 3", "third session"],
-    "followUpReferences": ["homework for next time", "follow up"]
+    "followUpReferences": ["homework for next time", "follow up"],
+    "explicitDates": ["2024-07-05", "July 5 2024", "7/5/2024"]
   },
   "therapyConcepts": {
     "therapeuticApproaches": ["CBT", "DBT", "psychodynamic", "humanistic"],
@@ -121,6 +123,9 @@ Please provide a comprehensive analysis in the following JSON format:
 
 ENHANCED ANALYSIS GUIDELINES:
 1. **Category Classification**: Determine the primary document type based on content structure and purpose
+   - **Session Transcript**: Verbatim or near-verbatim dialogue between therapist and client, conversation-style format, Q&A structure
+   - **Progress Note**: Clinical summary written by therapist, SOAP/DAP format, professional clinical language, treatment plan updates
+   - **Session Note**: General session documentation that doesn't clearly fit transcript or progress note categories
 2. **Entity Extraction**: Extract ALL relevant clinical entities including medications, diagnoses, symptoms, interventions, goals, and assessment types
 3. **Client Matching**: Use names, demographic info, and context clues to match clients with confidence scores
 4. **Session Context Analysis**: 
@@ -133,6 +138,7 @@ ENHANCED ANALYSIS GUIDELINES:
    - Direct appointment mentions
    - Session numbering or sequencing
    - Follow-up references
+   - **Explicit dates**: Extract any specific dates mentioned (e.g., "7/5/2024", "July 5, 2024", "session on 07-05-2024")
 6. **Therapy Concepts**: Extract sophisticated clinical concepts:
    - Therapeutic approaches and modalities used
    - Clinical terminology and techniques

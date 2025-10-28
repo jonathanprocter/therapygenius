@@ -41,9 +41,9 @@ const multerStorage = multer.diskStorage({
 });
 
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedTypes = [".pdf", ".docx", ".doc", ".txt", ".png", ".jpg", ".jpeg"];
+  const allowedTypes = [".pdf", ".docx", ".doc", ".txt", ".md", ".png", ".jpg", ".jpeg"];
   const ext = path.extname(file.originalname).toLowerCase();
-  
+
   if (allowedTypes.includes(ext)) {
     cb(null, true);
   } else {
@@ -205,11 +205,12 @@ export const getFileMimeType = (filename: string): string => {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".doc": "application/msword",
     ".txt": "text/plain",
+    ".md": "text/plain", // Treat markdown as plain text
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
   };
-  
+
   return mimeTypes[ext] || "application/octet-stream";
 };
 
